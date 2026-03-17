@@ -25,5 +25,13 @@ celery_app.conf.update(
             "task": "src.workers.tasks.inventory_tasks.reconcile_inventory",
             "schedule": 900.0,
         },
+        "product-sync": {
+            "task": "src.workers.tasks.product_tasks.product_sync",
+            "schedule": 1800.0,
+        },
+        "order-sync": {
+            "task": "src.workers.tasks.order_tasks.order_sync",
+            "schedule": 120.0,
+        },
     },
 )
