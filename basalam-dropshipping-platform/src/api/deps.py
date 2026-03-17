@@ -1,0 +1,119 @@
+"""
+API Dependencies
+================
+Common FastAPI dependencies for dependency injection
+"""
+
+from typing import Optional, AsyncGenerator
+from uuid import UUID
+
+import os
+import redis.asyncio as redis
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from src.core.database import async_session_maker
+from src.domains.accounts.models import User
+
+
+SECRET_KEY = os.getenv("SECRET_KEY", "{{SECRET_KEY}}")
+ALGORITHM = "HS256"
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+
+
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Dependency for FastAPI to get database session"""
+    async with async_session_maker() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+def decode_token(token: str) -> dict:
+    """Decode and validate JWT token"""
+    import jwt
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.InvalidTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+async def get_current_user(
+    token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)
+) -> User:
+    """Get current authenticated user from token"""
+    payload = decode_token(token)
+    user_id = payload.get("sub")
+
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload"
+        )
+
+    result = await db.execute(select(User).where(User.id == UUID(user_id)))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive"
+        )
+
+    return user
+
+
+async def get_current_active_user(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Get current active user"""
+    if not current_user.is_active:
+        raise HTTPException(status_code=400, detail="Inactive user")
+    return current_user
+
+
+async def get_redis() -> Optional[redis.Redis]:
+    """Get Redis client"""
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    try:
+        client = redis.from_url(redis_url, decode_responses=True)
+        yield client
+        await client.close()
+    except Exception:
+        yield None
+
+
+def require_role(*roles: str):
+    """Dependency to require specific roles"""
+
+    async def role_checker(current_user: User = Depends(get_current_user)) -> User:
+        if current_user.role not in roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions"
+            )
+        return current_user
+
+    return role_checker
