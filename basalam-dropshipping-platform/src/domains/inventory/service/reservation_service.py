@@ -1,13 +1,15 @@
 """
 Inventory Reservation Service
-=============================
-Business logic for inventory reservations
+============================
+Business logic for inventory reservations with deadlock detection and partial reservation support.
 """
 
+import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import List, Optional
-import uuid
+from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
@@ -19,14 +21,16 @@ from ..repository import (
     InventoryLogRepository,
 )
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class Reservation:
     """Reservation data transfer object"""
 
-    id: uuid.UUID
-    variant_id: uuid.UUID
-    order_item_id: uuid.UUID
+    id: uuid4
+    variant_id: uuid4
+    order_item_id: uuid4
     quantity: int
     status: str
     expires_at: datetime
@@ -51,12 +55,62 @@ class Reservation:
         )
 
 
+@dataclass
+class PartialReservationResult:
+    """Result of a partial inventory reservation attempt"""
+
+    success: bool
+    reserved_quantity: int
+    requested_quantity: int
+    available_quantity: int
+    message: str
+    reservations: List[Reservation]
+
+
+class DeadlockDetector:
+    """Detects and handles database deadlocks with retry logic."""
+
+    MAX_DEADLOCK_RETRIES = 3
+    DEADLOCK_ERROR_CODES = {"55P03", "40001"}
+
+    @staticmethod
+    def is_deadlock_error(exc: Exception) -> bool:
+        """Check if an exception is a deadlock error."""
+        error_msg = str(exc).lower()
+        return any(code in error_msg for code in DeadlockDetector.DEADLOCK_ERROR_CODES)
+
+    @staticmethod
+    async def execute_with_deadlock_retry(
+        session: AsyncSession,
+        func: callable,
+        max_retries: int = MAX_DEADLOCK_RETRIES,
+    ) -> any:
+        """Execute a function with deadlock retry logic."""
+        last_exception = None
+
+        for attempt in range(max_retries):
+            try:
+                return await func()
+            except Exception as exc:
+                if DeadlockDetector.is_deadlock_error(exc):
+                    last_exception = exc
+                    logger.warning(
+                        f"Deadlock detected on attempt {attempt + 1}/{max_retries}. "
+                        f"Retrying..."
+                    )
+                    await asyncio.sleep(0.1 * (attempt + 1))
+                    continue
+                raise
+
+        raise last_exception
+
+
 class ReservationService:
     """
     Service for managing inventory reservations.
 
     Handles atomic reservation, release, and consumption of inventory
-    with proper locking and transaction management.
+    with proper locking, deadlock detection, and partial reservation support.
     """
 
     DEFAULT_RESERVATION_MINUTES = 30
@@ -75,8 +129,8 @@ class ReservationService:
 
     async def reserve_inventory(
         self,
-        variant_id: uuid.UUID,
-        order_item_id: uuid.UUID,
+        variant_id: uuid4,
+        order_item_id: uuid4,
         quantity: int,
         expires_in_minutes: Optional[int] = None,
     ) -> Reservation:
@@ -152,6 +206,135 @@ class ReservationService:
         )
 
         return Reservation.from_model(reservation)
+
+    async def reserve_inventory_with_deadlock_retry(
+        self,
+        variant_id: uuid4,
+        order_item_id: uuid4,
+        quantity: int,
+        expires_in_minutes: Optional[int] = None,
+    ) -> Reservation:
+        """Reserve inventory with deadlock detection and automatic retry."""
+
+        async def _do_reserve():
+            return await self.reserve_inventory(
+                variant_id, order_item_id, quantity, expires_in_minutes
+            )
+
+        return await DeadlockDetector.execute_with_deadlock_retry(
+            self.session, _do_reserve
+        )
+
+    async def reserve_inventory_partial(
+        self,
+        variant_id: uuid4,
+        order_item_id: uuid4,
+        quantity: int,
+        expires_in_minutes: Optional[int] = None,
+        allow_partial: bool = False,
+    ) -> PartialReservationResult:
+        """
+        Reserve inventory with support for partial reservations.
+
+        If allow_partial is True and requested quantity exceeds available,
+        will reserve whatever is available up to the requested quantity.
+
+        Args:
+            variant_id: UUID of the supplier variant
+            order_item_id: UUID of the order item
+            quantity: Quantity to reserve
+            expires_in_minutes: Minutes until reservation expires
+            allow_partial: Whether to allow partial reservations
+
+        Returns:
+            PartialReservationResult with reservation details
+        """
+        if quantity <= 0:
+            return PartialReservationResult(
+                success=False,
+                reserved_quantity=0,
+                requested_quantity=quantity,
+                available_quantity=0,
+                message="Quantity must be positive",
+                reservations=[],
+            )
+
+        existing = await self._reservation_repo.get_by_order(order_item_id)
+        active_existing = [r for r in existing if r.status == "reserved"]
+        if active_existing:
+            return PartialReservationResult(
+                success=False,
+                reserved_quantity=0,
+                requested_quantity=quantity,
+                available_quantity=0,
+                message=f"Order item {order_item_id} already has an active reservation",
+                reservations=[],
+            )
+
+        variant = await self._inventory_repo.lock_for_update(variant_id)
+        if not variant:
+            return PartialReservationResult(
+                success=False,
+                reserved_quantity=0,
+                requested_quantity=quantity,
+                available_quantity=0,
+                message=f"Variant {variant_id} not found",
+                reservations=[],
+            )
+
+        available = variant.inventory - variant.reserved_inventory
+
+        if available < quantity:
+            if not allow_partial or available == 0:
+                return PartialReservationResult(
+                    success=False,
+                    reserved_quantity=0,
+                    requested_quantity=quantity,
+                    available_quantity=available,
+                    message=f"Insufficient inventory. Available: {available}, Requested: {quantity}",
+                    reservations=[],
+                )
+            quantity = available
+
+        expires_at = datetime.utcnow() + timedelta(
+            minutes=expires_in_minutes or self.DEFAULT_RESERVATION_MINUTES
+        )
+
+        reservation_data = {
+            "variant_id": variant_id,
+            "order_item_id": order_item_id,
+            "quantity": quantity,
+            "status": "reserved",
+            "expires_at": expires_at,
+        }
+
+        reservation = await self._reservation_repo.create(reservation_data)
+        await self._inventory_repo.reserve(variant_id, quantity)
+
+        await self._log_repo.create(
+            {
+                "variant_id": variant_id,
+                "old_inventory": variant.inventory - variant.reserved_inventory,
+                "new_inventory": variant.inventory
+                - variant.reserved_inventory
+                - quantity,
+                "change": -quantity,
+                "source": InventorySource.ORDER.value,
+                "reference_id": order_item_id,
+                "reference_type": "order",
+                "reason": f"Reserved {quantity} for order item",
+                "metadata": {"reservation_id": str(reservation.id)},
+            }
+        )
+
+        return PartialReservationResult(
+            success=True,
+            reserved_quantity=quantity,
+            requested_quantity=quantity,
+            available_quantity=available,
+            message=f"Reserved {quantity} units (requested: {quantity})",
+            reservations=[Reservation.from_model(reservation)],
+        )
 
     async def release_inventory(
         self,

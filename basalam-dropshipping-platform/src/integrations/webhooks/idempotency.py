@@ -1,6 +1,6 @@
 """
 Idempotency Manager
-===================
+==================
 Ensures webhook events are processed exactly once using Redis cache
 with database fallback.
 """
@@ -201,6 +201,79 @@ class IdempotencyManager:
             Number of records cleaned up
         """
         if not self.db_session:
+            return 0
+
+        from src.domains.webhooks.models import WebhookEventLog
+
+        cutoff = datetime.utcnow() - timedelta(seconds=self.REDIS_TTL_SECONDS)
+
+        try:
+            await self.db_session.execute(
+                WebhookEventLog.__table__.delete().where(
+                    WebhookEventLog.processed_at < cutoff
+                )
+            )
+            await self.db_session.commit()
+            return 0
+        except Exception as e:
+            logger.error(f"Failed to cleanup expired records: {e}")
+            return 0
+
+    async def warm_cache(self, platforms: Optional[list[str]] = None) -> int:
+        """
+        Warm the Redis cache with recent processed events from the database.
+
+        This improves performance by populating the fast-path Redis cache
+        with events that have been processed recently.
+
+        Args:
+            platforms: Optional list of platform IDs to warm cache for.
+                      If None, warms cache for all platforms.
+
+        Returns:
+            Number of events cached
+        """
+        if not self.redis or not self.db_session:
+            logger.warning("Cannot warm cache: Redis or DB session not available")
+            return 0
+
+        from src.domains.webhooks.models import WebhookEventLog
+
+        cutoff = datetime.utcnow() - timedelta(seconds=self.REDIS_TTL_SECONDS)
+
+        try:
+            stmt = select(WebhookEventLog).where(WebhookEventLog.processed_at >= cutoff)
+            if platforms:
+                stmt = stmt.where(WebhookEventLog.platform_id.in_(platforms))
+
+            stmt = stmt.order_by(WebhookEventLog.processed_at.desc())
+            stmt = stmt.limit(1000)
+
+            result = await self.db_session.execute(stmt)
+            records = result.scalars().all()
+
+            cached_count = 0
+            for record in records:
+                redis_key = self._build_redis_key(
+                    record.platform_id,
+                    record.event_id,
+                    record.payload_hash,
+                )
+                try:
+                    await self.redis.setex(
+                        redis_key,
+                        self.REDIS_TTL_SECONDS,
+                        record.processed_at.isoformat(),
+                    )
+                    cached_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to cache {redis_key}: {e}")
+
+            logger.info(f"Warmed cache with {cached_count} events")
+            return cached_count
+
+        except Exception as e:
+            logger.error(f"Failed to warm cache: {e}")
             return 0
 
         from src.domains.webhooks.models import WebhookEventLog

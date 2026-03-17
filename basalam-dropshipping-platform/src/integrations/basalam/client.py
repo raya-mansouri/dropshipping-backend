@@ -24,12 +24,20 @@ from .mappers import (
 class BasalamClient:
     BASE_URL = "https://api.basalam.com/api/v1"
 
+    DEFAULT_POOL_LIMITS = httpx.Limits(
+        max_keepalive_connections=20,
+        max_connections=100,
+        keepalive_expiry=30.0,
+    )
+
     def __init__(
         self,
         client_id: str,
         client_secret: str,
         access_token: Optional[str] = None,
         refresh_token: Optional[str] = None,
+        pool_limits: Optional[httpx.Limits] = None,
+        pool_timeout: float = 30.0,
     ):
         self.client_id = client_id
         self.client_secret = client_secret
@@ -38,6 +46,8 @@ class BasalamClient:
         self._http_client: Optional[httpx.AsyncClient] = None
         self.retry_policy = BasalamRetryPolicy(self)
         self.rate_limiter: Optional[RateLimiter] = None
+        self._pool_limits = pool_limits or self.DEFAULT_POOL_LIMITS
+        self._pool_timeout = pool_timeout
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._http_client is None or self._http_client.is_closed:
@@ -47,7 +57,8 @@ class BasalamClient:
             self._http_client = httpx.AsyncClient(
                 base_url=self.BASE_URL,
                 headers=headers,
-                timeout=30.0,
+                timeout=httpx.Timeout(self._pool_timeout, pool=self._pool_timeout),
+                limits=self._pool_limits,
             )
         return self._http_client
 

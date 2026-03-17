@@ -1,11 +1,11 @@
 """
 Webhook Processing Infrastructure
-==================================
+=================================
 Base webhook processor with signature verification and event data extraction.
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 import hashlib
 import hmac
@@ -33,8 +33,10 @@ class WebhookProcessor(ABC):
     Base class for all webhook processors.
 
     Provides common functionality for signature verification,
-    event data extraction, and processing workflow.
+    event data extraction, timestamp validation, and processing workflow.
     """
+
+    MAX_TIMESTAMP_AGE_SECONDS = 300  # 5 minutes
 
     def __init__(self, secret: str):
         self.secret = secret
@@ -87,6 +89,86 @@ class WebhookProcessor(ABC):
         ).hexdigest()
 
         return hmac.compare_digest(expected_signature, signature)
+
+    def validate_timestamp(
+        self,
+        payload: Dict[str, Any],
+        headers: Dict[str, str],
+        max_age_seconds: Optional[int] = None,
+    ) -> bool:
+        """
+        Validate that the webhook timestamp is within acceptable range.
+
+        Rejects webhooks that are older than 5 minutes (or configured max age)
+        to prevent replay attacks.
+
+        Args:
+            payload: The webhook payload
+            headers: HTTP headers
+            max_age_seconds: Maximum allowed age in seconds (default: 300 = 5 min)
+
+        Returns:
+            True if timestamp is valid and within range, False otherwise
+        """
+        max_age = max_age_seconds or self.MAX_TIMESTAMP_AGE_SECONDS
+
+        timestamp = self.extract_timestamp(payload, headers)
+
+        if timestamp is None:
+            logger.warning("No timestamp found in webhook payload or headers")
+            return False
+
+        now = datetime.utcnow()
+        if isinstance(timestamp, str):
+            try:
+                timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            except ValueError:
+                logger.warning(f"Invalid timestamp format: {timestamp}")
+                return False
+
+        age_seconds = abs((now - timestamp.replace(tzinfo=None)).total_seconds())
+
+        if age_seconds > max_age:
+            logger.warning(
+                f"Webhook timestamp too old: {age_seconds:.1f}s (max: {max_age}s)"
+            )
+            return False
+
+        return True
+
+    def extract_timestamp(
+        self, payload: Dict[str, Any], headers: Dict[str, str]
+    ) -> Optional[datetime]:
+        """
+        Extract timestamp from payload or headers.
+
+        Args:
+            payload: The webhook payload
+            headers: HTTP headers
+
+        Returns:
+            Timestamp if found, None otherwise
+        """
+        timestamp_str = (
+            payload.get("timestamp")
+            or payload.get("created_at")
+            or headers.get("X-Webhook-Timestamp")
+            or headers.get("X-Timestamp")
+        )
+
+        if timestamp_str:
+            try:
+                if isinstance(timestamp_str, datetime):
+                    return timestamp_str
+                return datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+            except ValueError:
+                try:
+                    ts = int(timestamp_str)
+                    return datetime.utcfromtimestamp(ts)
+                except (ValueError, OSError):
+                    pass
+
+        return None
 
     def extract_event_data(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """

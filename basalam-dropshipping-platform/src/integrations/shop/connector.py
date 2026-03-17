@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Type
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -80,7 +83,114 @@ class WebhookRegistration:
     active: bool = True
 
 
+@dataclass
+class ShippingMethod:
+    method_id: str
+    name: str
+    price: float
+    estimated_days: Optional[int] = None
+    carrier: Optional[str] = None
+
+
+class BaseShopConnector(ABC):
+    """
+    Base class for shop connectors with common functionality.
+
+    Provides shared implementation for connection management,
+    pagination, error handling, and common operations.
+    """
+
+    PLATFORM_CODE: str = ""
+
+    def __init__(self, credentials: Optional[Dict[str, Any]] = None):
+        self._credentials = credentials
+        self._connected = False
+        self._connection_result: Optional[ConnectionResult] = None
+        self._request_timeout = 30.0
+        self._max_retries = 3
+
+    @property
+    def platform_code(self) -> str:
+        return self.PLATFORM_CODE
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    @property
+    def connection_result(self) -> Optional[ConnectionResult]:
+        return self._connection_result
+
+    async def _ensure_connected(self) -> None:
+        if not self._connected:
+            raise ConnectionError("Not connected to shop")
+
+    async def _handle_request_error(self, error: Exception, context: str) -> None:
+        """Handle and log request errors."""
+        logger.error(f"Error in {context}: {error}")
+        raise
+
+    async def list_products_paginated(
+        self,
+        page: int = 1,
+        per_page: int = 50,
+        status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Fetch products with pagination support.
+
+        Args:
+            page: Page number
+            per_page: Items per page
+            status: Filter by status
+
+        Returns:
+            Dict with products and pagination info
+        """
+        products = await self.get_products()
+        if status:
+            products = [p for p in products if p.status == status]
+
+        start = (page - 1) * per_page
+        end = start + per_page
+        paginated = products[start:end]
+
+        return {
+            "products": paginated,
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": len(products),
+                "pages": (len(products) + per_page - 1) // per_page,
+            },
+        }
+
+    async def get_product_variants(self, product_id: str) -> List[ProductVariant]:
+        """Get variants for a specific product."""
+        product = await self.get_product(product_id)
+        return product.variants
+
+    async def create_order_items(self, items: List[Dict[str, Any]]) -> List[OrderItem]:
+        """Convert raw items to OrderItem objects."""
+        result = []
+        for item in items:
+            result.append(
+                OrderItem(
+                    item_id=item.get("id", ""),
+                    product_id=item.get("product_id", ""),
+                    variant_id=item.get("variant_id"),
+                    title=item.get("title", ""),
+                    quantity=item.get("quantity", 1),
+                    price=float(item.get("price", 0)),
+                    metadata=item.get("metadata", {}),
+                )
+            )
+        return result
+
+
 class ShopConnector(ABC):
+    """Abstract shop connector interface."""
+
     PLATFORM_CODE: str = ""
 
     def __init__(self, credentials: Optional[Dict[str, Any]] = None):
