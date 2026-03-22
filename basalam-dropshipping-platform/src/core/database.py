@@ -5,13 +5,25 @@ SQLAlchemy async configuration with PostgreSQL
 """
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
-from sqlalchemy import Column, DateTime, Uuid
+from sqlalchemy import Column, DateTime, Uuid, MetaData
 from datetime import datetime
 import uuid
 
 from src.core.config import get_settings
 
-# Async engine for PostgreSQL
+# Naming conventions ensure Alembic generates consistent, portable constraint
+# names across all environments. Without this, names are auto-generated and
+# differ between databases, causing migration failures.
+NAMING_CONVENTION = {
+    "ix": "ix__%(table_name)s__%(column_0_name)s",
+    "uq": "uq__%(table_name)s__%(column_0_name)s",
+    "ck": "ck__%(table_name)s__%(constraint_name)s",
+    "fk": "fk__%(table_name)s__%(column_0_name)s__%(referred_table_name)s",
+    "pk": "pk__%(table_name)s",
+}
+
+Base = declarative_base(metadata=MetaData(naming_convention=NAMING_CONVENTION))
+
 DATABASE_URL = get_settings().database_url
 
 engine = create_async_engine(
@@ -27,8 +39,6 @@ async_session_maker = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False
 )
-
-Base = declarative_base()
 
 
 class TimestampMixin:
@@ -58,9 +68,3 @@ async def get_db() -> AsyncSession:
             raise
         finally:
             await session.close()
-
-
-async def init_db():
-    """Initialize database tables"""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)

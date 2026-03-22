@@ -1,22 +1,26 @@
 """
 FastAPI Application Entry Point
 ===============================
-Main FastAPI application with all routers
+Main FastAPI application with all routers.
+Runs Alembic migrations on startup via asyncio.to_thread.
 """
-
+import asyncio
 from contextlib import asynccontextmanager
+
+from alembic import command
+from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.v1 import auth, orders, products, shops, health
 from src.core.config import get_settings
-from src.core.database import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan handler"""
-    await init_db()
+    """Run Alembic migrations on startup, then serve."""
+    alembic_cfg = Config("alembic.ini")
+    await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
     yield
 
 

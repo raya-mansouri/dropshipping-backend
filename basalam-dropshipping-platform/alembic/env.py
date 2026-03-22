@@ -1,7 +1,9 @@
 """
 Alembic Environment Configuration
 ===================================
-Configures Alembic for async SQLAlchemy with asyncpg
+Async SQLAlchemy setup for database migrations.
+DB URL loaded from app settings — never hardcoded.
+All models registered via src.domains.__init__ package magic.
 """
 
 import asyncio
@@ -13,81 +15,33 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
-# Import all models from src.domains
-from src.domains.accounts.models import User, Account, Role, UserRole, account_roles
-from src.domains.shops.models import (
-    Platform,
-    Shop,
-    ShopIntegration,
-    SyncJob,
-    ShippingMethod,
-    SupplierShippingProfile,
-)
-from src.domains.products.models import (
-    Category,
-    SupplierProduct,
-    ProductVariant,
-    SupplierVariant,
-    ProductMedia,
-    SellerListing,
-    SellerVariant,
-)
-from src.domains.orders.models import Order, OrderItem, OrderHistory, Shipment
-from src.domains.payments.models import Payment, Refund, SupplierPayout, Dispute
-from src.domains.inventory.models import (
-    InventoryReservation,
-    InventoryLog,
-    InventoryReconciliation,
-)
-from src.domains.webhooks.models import (
-    WebhookEvent,
-    ProcessedEvent,
-    WebhookRetrySchedule,
-    WebhookDeadLetter,
-)
-from src.domains.notifications.models import (
-    Notification,
-    NotificationPreference,
-    NotificationLog,
-)
-from src.domains.integration_logs.models import IntegrationLog
-from src.domains.product_validation.models import ProductValidationLog
-from src.domains.system_logs.models import SystemLog
-from src.domains.audit_logs.models import AuditLog
-from src.domains.fraud_detection.models import FraudSignal
+import src.domains  # noqa: F401 — triggers src/domains/__init__.py, registers all models
+from src.core.config import get_settings
 from src.core.database import Base
 
 # Alembic Config object
 config = context.config
 
+# Load DB URL from app settings (overrides alembic.ini)
+config.set_main_option("sqlalchemy.url", get_settings().database_url)
+
 # Interpret the config file for Python logging
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Set target metadata for autogenerate
+# Target metadata — all tables registered via src.domains import above
 target_metadata = Base.metadata
-
-# Database URL from config
-# The URL should include 'postgresql+asyncpg://' prefix
-sqlalchemy_url = config.get_main_option("sqlalchemy.url")
 
 
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode.
-
-    This configures the context with just a URL and not an Engine,
-    though an Engine is acceptable here as well. By skipping the Engine
-    creation we don't even need a DBAPI to be available.
-
-    Calls to context.execute() here emit the given string to the
-    script output.
-    """
+    """Run migrations in 'offline' mode (generates SQL without a live connection)."""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        compare_type=True,
     )
 
     with context.begin_transaction():
@@ -95,8 +49,11 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
-
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+    )
     with context.begin_transaction():
         context.run_migrations()
 
