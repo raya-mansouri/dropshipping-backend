@@ -13,6 +13,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from src.core.database import Base, TimestampMixin, UUIDMixin
 import uuid
+from datetime import datetime
 from enum import Enum
 
 
