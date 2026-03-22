@@ -5,12 +5,14 @@ SQLAlchemy async configuration with PostgreSQL
 """
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
-from sqlalchemy import Column, DateTime
+from sqlalchemy import Column, DateTime, Uuid
 from datetime import datetime
 import uuid
 
+from src.core.config import get_settings
+
 # Async engine for PostgreSQL
-DATABASE_URL = "{{DATABASE_URL}}"  # postgresql+asyncpg://user:pass@host/db
+DATABASE_URL = get_settings().database_url
 
 engine = create_async_engine(
     DATABASE_URL,
@@ -38,7 +40,7 @@ class TimestampMixin:
 class UUIDMixin:
     """Mixin for UUID primary key"""
     id = Column(
-        uuid.UUID, 
+        Uuid(as_uuid=True),
         primary_key=True, 
         default=uuid.uuid4,
         nullable=False
