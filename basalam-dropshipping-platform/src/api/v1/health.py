@@ -4,11 +4,11 @@ Health Check API Endpoints
 FastAPI endpoints for monitoring service health
 """
 
-import os
 from typing import Dict, Any
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel
 
+from src.core.config import get_settings
 from src.core.database import async_session_maker
 from src.core.events.publisher import EventPublisher
 
@@ -38,7 +38,7 @@ async def check_database() -> DependencyHealth:
 
 async def get_redis_client():
     """Get Redis client from environment"""
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    redis_url = get_settings().redis_url
     try:
         import redis.asyncio as redis
 
@@ -64,7 +64,7 @@ async def check_redis(redis_client) -> DependencyHealth:
 
 async def check_kafka() -> DependencyHealth:
     """Check Kafka connection"""
-    kafka_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+    kafka_servers = get_settings().kafka_bootstrap_servers
     if not kafka_servers:
         return DependencyHealth(status="unavailable", message="Kafka not configured")
 
@@ -97,7 +97,7 @@ async def detailed_health_check():
     try:
         import redis.asyncio as redis
 
-        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        redis_url = get_settings().redis_url
         redis_client = redis.from_url(redis_url, decode_responses=True)
         await redis_client.ping()
         redis_health = DependencyHealth(status="healthy", message="Redis connection OK")

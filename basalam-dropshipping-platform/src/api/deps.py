@@ -7,19 +7,19 @@ Common FastAPI dependencies for dependency injection
 from typing import Optional, AsyncGenerator
 from uuid import UUID
 
-import os
 import redis.asyncio as redis
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from src.core.config import get_settings
 from src.core.database import async_session_maker
 from src.domains.accounts.models import User
 
 
-SECRET_KEY = os.getenv("SECRET_KEY", "{{SECRET_KEY}}")
-ALGORITHM = "HS256"
+SECRET_KEY = get_settings().secret_key.get_secret_value()
+ALGORITHM = get_settings().jwt_algorithm
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -97,7 +97,7 @@ async def get_current_active_user(
 
 async def get_redis() -> Optional[redis.Redis]:
     """Get Redis client"""
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    redis_url = get_settings().redis_url
     try:
         client = redis.from_url(redis_url, decode_responses=True)
         yield client

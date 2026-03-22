@@ -13,7 +13,6 @@ Tasks:
 
 import hashlib
 import logging
-import os
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -27,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domains.products.models import ProductMedia
+from src.core.config import get_settings
 from src.core.database import async_session_maker
 
 logger = logging.getLogger(__name__)
@@ -66,21 +66,22 @@ class ImageConfig:
     """Configuration for image service"""
 
     def __init__(self):
-        self.minio_endpoint = os.getenv("MINIO_ENDPOINT", "localhost:9000")
-        self.minio_access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-        self.minio_secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
-        self.minio_bucket = os.getenv("MINIO_BUCKET", "basalam-images")
-        self.minio_region = os.getenv("MINIO_REGION", "us-east-1")
-        self.minio_use_ssl = os.getenv("MINIO_USE_SSL", "false").lower() == "true"
+        _s = get_settings()
+        self.minio_endpoint = _s.minio_endpoint
+        self.minio_access_key = _s.minio_access_key
+        self.minio_secret_key = _s.minio_secret_key.get_secret_value()
+        self.minio_bucket = _s.minio_bucket
+        self.minio_region = _s.minio_region
+        self.minio_use_ssl = _s.minio_use_ssl
 
-        self.cdn_base_url = os.getenv("CDN_BASE_URL", "https://cdn.basalam.com")
+        self.cdn_base_url = _s.cdn_base_url
 
-        self.image_max_width = int(os.getenv("IMAGE_MAX_WIDTH", "1920"))
-        self.image_max_height = int(os.getenv("IMAGE_MAX_HEIGHT", "1920"))
-        self.image_quality = int(os.getenv("IMAGE_QUALITY", "85"))
-        self.image_format = os.getenv("IMAGE_FORMAT", "WEBP").upper()
+        self.image_max_width = _s.image_max_width
+        self.image_max_height = _s.image_max_height
+        self.image_quality = _s.image_quality
+        self.image_format = _s.image_format.upper()
 
-        self.http_timeout = float(os.getenv("IMAGE_HTTP_TIMEOUT", "30.0"))
+        self.http_timeout = _s.image_http_timeout
 
         self.basalam_cdn_base = "https://cdn.basalam.com"
 

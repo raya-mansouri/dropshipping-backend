@@ -16,6 +16,7 @@ import hashlib
 import secrets
 
 from src.core.database import get_db
+from src.core.config import get_settings
 from src.domains.accounts.models import User, Account
 from src.domains.accounts.schemas import (
     UserResponse,
@@ -37,10 +38,10 @@ from src.domains.accounts.schemas import (
 # Configuration
 # ============================================
 
-SECRET_KEY = "{{SECRET_KEY}}"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-REFRESH_TOKEN_EXPIRE_DAYS = 7
+SECRET_KEY = get_settings().secret_key.get_secret_value()
+ALGORITHM = get_settings().jwt_algorithm
+ACCESS_TOKEN_EXPIRE_MINUTES = get_settings().access_token_expire_minutes
+REFRESH_TOKEN_EXPIRE_DAYS = get_settings().refresh_token_expire_days
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 

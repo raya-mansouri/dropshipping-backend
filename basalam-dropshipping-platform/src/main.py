@@ -4,12 +4,12 @@ FastAPI Application Entry Point
 Main FastAPI application with all routers
 """
 
-import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.v1 import auth, orders, products, shops, health
+from src.core.config import get_settings
 from src.core.database import init_db
 
 
@@ -29,7 +29,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+    allow_origins=get_settings().cors_origins.split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,4 +1,3 @@
-import os
 import sys
 from typing import Any, Dict, Optional
 
@@ -12,6 +11,8 @@ import logging.config
 import sentry_sdk
 from sentry_sdk.integrations.logging import SentryHandler
 
+from src.core.config import get_settings
+
 
 def _add_timestamp(
     logger: Any, method_name: str, event_dict: Dict[str, Any]
@@ -23,9 +24,10 @@ def _add_timestamp(
 
 
 def configure_logging() -> None:
-    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-    sentry_dsn = os.getenv("SENTRY_DSN", "")
-    app_env = os.getenv("APP_ENV", "development")
+    settings = get_settings()
+    log_level = settings.log_level.upper()
+    sentry_dsn = settings.sentry_dsn
+    app_env = settings.app_env
 
     is_production = app_env == "production"
 

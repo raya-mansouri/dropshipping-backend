@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from uuid import UUID
 from typing import List, Optional, Dict, Any
 
+from src.core.config import get_settings
 from ..ports import (
     ShopConnectorPort,
     ShopProducts,
@@ -49,12 +50,13 @@ class BasalamConnectorAdapter(ShopConnectorPort):
     
     @property
     def oauth_config(self) -> OAuthConfig:
+        _s = get_settings()
         return OAuthConfig(
-            client_id="{{BASALAM_CLIENT_ID}}",
-            client_secret="{{BASALAM_CLIENT_SECRET}}",
+            client_id=_s.basalam_client_id,
+            client_secret=_s.basalam_client_secret.get_secret_value(),
             authorize_url=f"{self.API_BASE_URL}/oauth/authorize",
             token_url=f"{self.API_BASE_URL}/oauth/token",
-            redirect_uri="{{BASE_URL}}/integrations/basalam/callback",
+            redirect_uri=f"{_s.base_url}/integrations/basalam/callback",
             scopes=[
                 "vendor.products.read",
                 "vendor.products.write",

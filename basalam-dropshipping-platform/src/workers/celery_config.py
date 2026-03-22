@@ -1,7 +1,8 @@
-import os
 from celery import Celery
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+from src.core.config import get_settings
+
+REDIS_URL = get_settings().redis_url
 
 celery_app = Celery("inventory_tasks")
 
