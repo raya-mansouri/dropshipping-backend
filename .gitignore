@@ -208,4 +208,5 @@ __marimo__/
 
 .claude
 .kilocode
-openspec
+poetry.lock
+uv.lock

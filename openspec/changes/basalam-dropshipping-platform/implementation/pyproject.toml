@@ -1,0 +1,50 @@
+[tool.poetry]
+name = "basalam-dropshipping-platform"
+version = "0.1.0"
+description = "Basalam Dropshipping Platform"
+authors = ["Basalam Team"]
+readme = "README.md"
+packages = [{include = "src", from = "."}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.109.0"
+sqlalchemy = {extras = ["asyncio"], version = "^2.0.0"}
+asyncpg = "^0.29.0"
+alembic = "^1.13.0"
+celery = "^5.3.0"
+redis = "^5.0.0"
+aiokafka = "^0.10.0"
+pydantic = "^2.5.0"
+pydantic-settings = "^2.1.0"
+sentry-sdk = "^1.39.0"
+python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+passlib = "^1.7.4"
+python-multipart = "^0.0.6"
+aiofiles = "^23.2.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-asyncio = "^0.23.0"
+httpx = "^0.26.0"
+black = "^24.1.0"
+isort = "^5.13.0"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.poetry.scripts]
+app = "src.main:app"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
