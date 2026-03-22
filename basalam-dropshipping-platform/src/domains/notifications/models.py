@@ -3,7 +3,7 @@ Notifications Domain Models
 ==========================
 In-app, email, SMS, and webhook notifications
 """
-from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Integer, Text, Index
+from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Integer, Text, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from src.core.database import Base, TimestampMixin, UUIDMixin
@@ -117,7 +117,7 @@ class NotificationLog(Base, UUIDMixin):
     sent_at = Column(DateTime)
     delivered_at = Column(DateTime)
     
-    cost = Column(Numeric(10, 2))  # SMS cost etc.
+    cost = Column(Integer, nullable=False)  # SMS cost etc.
     
     __table_args__ = (
         Index('idx_notification_logs_notification', 'notification_id'),

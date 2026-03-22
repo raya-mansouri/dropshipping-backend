@@ -9,7 +9,7 @@ Handles:
 - Seller listings (what sellers offer)
 - Categories with franchise rules
 """
-from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Numeric, Integer, Text
+from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Numeric, Integer, Text, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from src.core.database import Base, TimestampMixin, UUIDMixin

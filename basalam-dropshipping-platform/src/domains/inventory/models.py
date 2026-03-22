@@ -8,7 +8,7 @@ Key concepts per a.md:
 - Atomic reservation for orders
 - Reconciliation jobs
 """
-from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Integer, Numeric, Text
+from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Integer, Numeric, Text, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from src.core.database import Base, TimestampMixin, UUIDMixin

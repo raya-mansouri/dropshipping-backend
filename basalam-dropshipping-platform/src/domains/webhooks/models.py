@@ -8,7 +8,7 @@ Webhook reliability per a.md:
 - Retry schedule: 1m, 5m, 15m, 1h, 6h
 - Dead letter queue for failed events
 """
-from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Integer, Text, Index
+from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Integer, Text, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from src.core.database import Base, TimestampMixin, UUIDMixin
