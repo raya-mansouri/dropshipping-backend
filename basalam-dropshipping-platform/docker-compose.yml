@@ -1,26 +1,30 @@
-version: '3.8'
-
 services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres:
-    image: postgis/postgis:15-3.2
+    image: postgres:18.3-alpine
     container_name: basalam_postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: basalam_platform
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: basalam
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d basalam_platform"]
+      test: ["CMD-SHELL", "pg_isready -U user -d basalam"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
 
+  # ── Redis ───────────────────────────────────────────────────────────────────
   redis:
-    image: redis:7-alpine
+    image: redis:7.2-alpine
     container_name: basalam_redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
@@ -30,33 +34,52 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
+  # ── Kafka (KRaft mode — no ZooKeeper) ───────────────────────────────────────
   kafka:
-    image: bitnami/kafka:3.6
+    image: bitnami/kafka:3.9
     container_name: basalam_kafka
+    restart: unless-stopped
     environment:
       KAFKA_CFG_NODE_ID: 0
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
     ports:
       - "9092:9092"
     volumes:
       - kafka_data:/bitnami/kafka
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
+  # ── Kafka UI ─────────────────────────────────────────────────────────────────
   kafka-ui:
-    image: provectuslabs/kafka-ui:latest
+    image: provectuslabs/kafka-ui:v0.7.2
     container_name: basalam_kafka_ui
+    restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
 
+  # ── MinIO ────────────────────────────────────────────────────────────────────
   minio:
-    image: minio/minio
+    image: minio/minio:RELEASE.2025-02-28T09-55-16Z
     container_name: basalam_minio
+    restart: unless-stopped
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -66,23 +89,16 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
-  pgadmin:
-    image: dpage/pgadmin4
-    container_name: basalam_pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@basalam.com
-      PGADMIN_DEFAULT_PASSWORD: admin
-    ports:
-      - "5050:80"
-    depends_on:
-      - postgres
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
 
 volumes:
   postgres_data:
   redis_data:
   kafka_data:
   minio_data:
-  pgadmin_data:
