@@ -52,7 +52,7 @@ class Order(Base, UUIDMixin, TimestampMixin):
     
     # Metadata
     notes = Column(Text)
-    metadata = Column(JSONB, default=dict)
+    extra_data = Column("metadata", JSONB, default=dict)
     
     # Timestamps
     confirmed_at = Column(DateTime)
@@ -139,7 +139,7 @@ class OrderHistory(Base, UUIDMixin):
     actor_id = Column(UUID(as_uuid=True))
     
     reason = Column(Text)
-    metadata = Column(JSONB, default=dict)
+    extra_data = Column("metadata", JSONB, default=dict)
     
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 

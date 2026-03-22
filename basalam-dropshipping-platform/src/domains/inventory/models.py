@@ -66,7 +66,7 @@ class InventoryLog(Base, UUIDMixin):
     reference_type = Column(String(50))  # order, sync_job, manual
     
     reason = Column(Text)
-    metadata = Column(JSONB, default=dict)
+    extra_data = Column("metadata", JSONB, default=dict)
     
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     

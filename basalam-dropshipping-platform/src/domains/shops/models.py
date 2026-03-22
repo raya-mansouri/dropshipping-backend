@@ -122,7 +122,7 @@ class ShippingMethod(Base, UUIDMixin, TimestampMixin):
     shipping_type = Column(String(30), nullable=False)  # vendor, platform, third_party, express, pickup
     external_shipping_id = Column(String(255))
     active = Column(Boolean, default=True)
-    metadata = Column(JSONB, default=dict)
+    extra_data = Column("metadata", JSONB, default=dict)
     
     # Relationships
     platform = relationship("Platform", back_populates="shipping_methods")

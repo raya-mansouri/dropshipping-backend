@@ -24,7 +24,7 @@ class SystemLog(Base, UUIDMixin, TimestampMixin):
         String(50), nullable=False
     )  # sync_worker, webhook_processor, order_service, etc.
     message = Column(Text, nullable=False)
-    metadata = Column(JSONB, default=dict)
+    extra_data = Column("metadata", JSONB, default=dict)
 
     created_at = Column(DateTime, nullable=False)
 

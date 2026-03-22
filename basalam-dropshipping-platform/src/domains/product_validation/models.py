@@ -31,7 +31,7 @@ class ProductValidationLog(Base, UUIDMixin, TimestampMixin):
 
     error_code = Column(String(50))
     error_message = Column(Text)
-    metadata = Column(JSONB, default=dict)
+    extra_data = Column("metadata", JSONB, default=dict)
 
     created_at = Column(DateTime, nullable=False)
 

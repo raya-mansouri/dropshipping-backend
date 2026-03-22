@@ -63,7 +63,7 @@ class Payment(Base, UUIDMixin, TimestampMixin):
     failure_code = Column(String(50))
     
     # Metadata
-    metadata = Column(JSONB, default=dict)
+    extra_data = Column("metadata", JSONB, default=dict)
     
     # Relationships
     order = relationship("Order", back_populates="payments")
