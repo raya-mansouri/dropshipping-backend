@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     basalam_client_id: str = ""
     basalam_client_secret: SecretStr = SecretStr("")
     base_url: str = "http://localhost:8000"
+    docs_offline: bool = False
 
     # ------------------------------------------------------------------
     # MinIO / Storage
