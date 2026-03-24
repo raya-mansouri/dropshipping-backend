@@ -4,7 +4,6 @@
 The system SHALL send notifications via multiple channels.
 
 #### Channels:
-- Email
 - SMS
 - In-app
 - Webhook (for seller stores)
@@ -47,7 +46,7 @@ The system SHALL allow users to configure notification preferences.
 The system SHALL ensure notifications are delivered.
 
 #### Scenario: Notification delivery fails
-- **WHEN** email/SMS fails to deliver
+- **WHEN** SMS fails to deliver
 - **THEN** system SHALL retry 3 times
 - **AND** log failure
 - **AND** show in notification center

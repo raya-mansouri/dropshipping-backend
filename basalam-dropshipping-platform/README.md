@@ -4,7 +4,7 @@
 
 This implementation uses **Ports and Adapters (Hexagonal)** pattern to ensure:
 1. **Shop Connections**: Easy to add new platforms (Basalam, Shopify, WooCommerce)
-2. **Notifications**: Easy to add new channels (Email, SMS, In-App, Webhook)
+2. **Notifications**: Easy to add new channels (SMS, In-App, Webhook)
 3. **Testability**: Core domain is isolated from external dependencies
 
 ---
@@ -34,7 +34,6 @@ implementation/
 │   │       ├── ports.py          # NOTIFICATION PORT (interface)
 │   │       ├── manager.py        # Notification manager
 │   │       └── adapters/
-│   │           ├── email.py     # Email adapter
 │   │           ├── sms.py        # SMS adapter (Kavenegar, Twilio)
 │   │           ├── in_app.py    # In-app adapter
 │   │           └── webhook.py   # Webhook adapter
@@ -122,7 +121,7 @@ class NotificationPort(ABC):
 
 | Adapter | Channel | Provider |
 |---------|---------|----------|
-| `EmailNotificationAdapter` | email | SMTP, SendGrid |
+| `NotificationAdapter` | SMTP, SendGrid |
 | `KavenegarSMSAdapter` | sms | Kavenegar |
 | `TwilioSMSAdapter` | sms | Twilio |
 | `InAppNotificationAdapter` | in_app | Database |
@@ -134,8 +133,8 @@ class NotificationPort(ABC):
 # Send notification via specific channel
 manager = create_notification_manager(config)
 await manager.send(
-    channel=NotificationChannel.EMAIL,
-    recipient=NotificationRecipient(email="user@example.com"),
+    channel=NotificationChannel.SMS,
+    recipient=NotificationRecipient(phone="09123456789"),
     content=NotificationContent(title="Order", body="New order received")
 )
 

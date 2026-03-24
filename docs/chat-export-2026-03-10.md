@@ -207,7 +207,7 @@ Seller Store Order      ↓Create Order      ↓Validate Inventory      ↓Reser
 
 سیستم نوتیفیکیشن لازم داری.
 ```
-EmailSMSIn-appWebhook
+SMSIn-appWebhook
 ```
 
 Event ها:
@@ -604,7 +604,7 @@ low inventoryproduct removedorder receivedpayment deadlineshipping deadline
 
 channels
 ```
-emailsmsdashboardwebhook
+smsdashboardwebhook
 ```
 
 # 3️⃣ مهم‌ترین Edge Case های واقعی

@@ -12,6 +12,7 @@ import bcrypt
 
 from ..repository import UserRepository
 from ..models import User
+from src.core.validators.phone import validate_iranian_phone
 
 
 class UserService:
@@ -61,19 +62,19 @@ class UserService:
 
     async def create_user(
         self,
-        email: str,
-        phone: Optional[str],
+        phone: str,
         password: str,
-        account_id: Optional[uuid.UUID],
+        full_name: Optional[str] = None,
+        account_id: Optional[uuid.UUID] = None,
         role: str = "user",
     ) -> User:
         """
-        Create a new user.
+        Create a new user using phone number as primary identifier.
 
         Args:
-            email: User email address
-            phone: User phone number
+            phone: User phone number (Iranian format: 11 digits starting with 09)
             password: User plain text password
+            full_name: Optional user full name
             account_id: Optional associated account UUID
             role: User role (user, admin, super_admin)
 
@@ -81,22 +82,28 @@ class UserService:
             Newly created User instance
 
         Raises:
-            ValueError: If email already exists
+            ValueError: If phone number is invalid or already exists
         """
-        existing_user = await self.user_repository.get_by_email(email)
+        # Validate phone number format
+        is_valid, error = validate_iranian_phone(phone)
+        if not is_valid:
+            raise ValueError(f"Invalid phone number: {error}")
+        
+        # Check if phone already exists
+        existing_user = await self.user_repository.get_by_phone(phone)
         if existing_user:
-            raise ValueError(f"User with email {email} already exists")
+            raise ValueError(f"User with phone number {phone} already exists")
 
         password_hash = self._hash_password(password)
 
         user_data: Dict[str, Any] = {
-            "email": email,
+            "phone": phone,
             "password_hash": password_hash,
             "role": role,
         }
 
-        if phone:
-            user_data["phone"] = phone
+        if full_name:
+            user_data["full_name"] = full_name
 
         user = await self.user_repository.create(user_data)
 
@@ -114,17 +121,17 @@ class UserService:
         """
         return await self.user_repository.get_by_id(user_id)
 
-    async def get_user_by_email(self, email: str) -> Optional[User]:
+    async def get_user_by_phone(self, phone: str) -> Optional[User]:
         """
-        Get user by email address.
+        Get user by phone number.
 
         Args:
-            email: User email address
+            phone: User phone number (Iranian format)
 
         Returns:
             User instance if found, None otherwise
         """
-        return await self.user_repository.get_by_email(email)
+        return await self.user_repository.get_by_phone(phone)
 
     async def update_user(
         self, user_id: uuid.UUID, data: Dict[str, Any]
@@ -139,6 +146,12 @@ class UserService:
         Returns:
             Updated User instance if found, None otherwise
         """
+        # Validate phone if being updated
+        if "phone" in data and data["phone"]:
+            is_valid, error = validate_iranian_phone(data["phone"])
+            if not is_valid:
+                raise ValueError(f"Invalid phone number: {error}")
+        
         if "password" in data:
             data["password_hash"] = self._hash_password(data.pop("password"))
 

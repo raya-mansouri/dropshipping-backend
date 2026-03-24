@@ -81,7 +81,7 @@ class TestCompleteOrderLifecycle:
         order = await service.create_order(
             shop_id=sample_shop_id,
             items=sample_items,
-            customer_data={"email": "customer@example.com", "name": "Test Customer"},
+            customer_data={"phone": "09123456789", "name": "Test Customer"},
             external_order_id="EXT-ORD-123",
             shipping_price=Decimal("10.00"),
         )

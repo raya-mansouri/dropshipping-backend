@@ -11,13 +11,12 @@ import uuid
 
 
 class User(Base, UUIDMixin, TimestampMixin):
-    """System users"""
+    """System users - phone is the only identifier"""
     __tablename__ = "users"
     
-    email = Column(String(255), unique=True, nullable=False, index=True)
+    phone = Column(String(11), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(255))
-    phone = Column(String(20))
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
     role = Column(String(20), default="user")  # user, admin, super_admin

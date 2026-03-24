@@ -41,31 +41,37 @@ class UserRepository:
         result = await self.session.execute(select(User).where(User.id == id))
         return result.scalar_one_or_none()
 
-    async def get_by_email(self, email: str) -> Optional[User]:
-        """
-        Get user by email address.
-
-        Args:
-            email: User email address
-
-        Returns:
-            User instance if found, None otherwise
-        """
-        result = await self.session.execute(select(User).where(User.email == email))
-        return result.scalar_one_or_none()
-
     async def get_by_phone(self, phone: str) -> Optional[User]:
         """
-        Get user by phone number.
+        Get user by phone number (primary identifier).
 
         Args:
-            phone: User phone number
+            phone: User phone number (Iranian format)
 
         Returns:
             User instance if found, None otherwise
         """
         result = await self.session.execute(select(User).where(User.phone == phone))
         return result.scalar_one_or_none()
+
+    async def check_phone_unique(self, phone: str, exclude_user_id: Optional[uuid.UUID] = None) -> bool:
+        """
+        Check if phone number is unique (not used by another user).
+
+        Args:
+            phone: Phone number to check
+            exclude_user_id: Optional user ID to exclude from check (for updates)
+
+        Returns:
+            True if phone is unique, False if already in use
+        """
+        query = select(User).where(User.phone == phone)
+        if exclude_user_id:
+            query = query.where(User.id != exclude_user_id)
+        
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none() is None
+
 
     async def create(self, data: dict) -> User:
         """

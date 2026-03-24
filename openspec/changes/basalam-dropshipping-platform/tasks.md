@@ -78,7 +78,7 @@ sentry-sdk = "^1.40.0"
 
 ### System Tables
 - [x] 2.29 Create product_validation_logs table
-- [x] 2.30 Create notifications table (channel: email/sms/in_app/webhook)
+- [x] 2.30 Create notifications table (channel: sms/in_app/webhook)
 - [x] 2.31 Create system_logs table
 - [x] 2.32 Create audit_logs table
 - [x] 2.33 Create fraud_signals table
@@ -421,7 +421,6 @@ sentry-sdk = "^1.40.0"
 ## 10. Notification System
 
 - [x] 10.1 Create NotificationService (exists in notification/manager.py)
-- [x] 10.2 Implement email notifications (SMTP)
 - [x] 10.3 Implement SMS notifications (Kavenegar)
 - [x] 10.4 Implement in-app notifications
 - [x] 10.5 Create notification preferences

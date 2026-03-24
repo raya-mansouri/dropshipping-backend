@@ -18,7 +18,6 @@ from .ports import (
     NotificationRecipient,
     NotificationContent,
 )
-from .adapters.email import EmailNotificationAdapter
 from .adapters.sms import KavenegarSMSAdapter
 from .adapters.in_app import InAppNotificationAdapter
 from .adapters.webhook import WebhookNotificationAdapter
@@ -29,7 +28,7 @@ class NotificationManager:
     Manages all notification channels
     
     Provides unified interface for sending notifications
-    across multiple channels (Email, SMS, In-App, Webhook)
+    across multiple channels (SMS, In-App, Webhook)
     """
     
     def __init__(self):
@@ -137,7 +136,6 @@ class NotificationManager:
         """Send notification to user via preferred channels"""
         recipient = NotificationRecipient(
             user_id=user_id,
-            email=metadata.get("email") if metadata else None,
             phone=metadata.get("phone") if metadata else None,
             webhook_url=metadata.get("webhook_url") if metadata else None
         )
@@ -160,18 +158,6 @@ class NotificationManager:
 def create_notification_manager(config: Dict[str, Any]) -> NotificationManager:
     """Create and configure notification manager"""
     manager = NotificationManager()
-    
-    # Register Email adapter
-    if config.get("email"):
-        email_adapter = EmailNotificationAdapter(
-            smtp_host=config["email"].get("smtp_host", "smtp.gmail.com"),
-            smtp_port=config["email"].get("smtp_port", 587),
-            username=config["email"].get("username", ""),
-            password=config["email"].get("password", ""),
-            from_email=config["email"].get("from_email", "noreply@basalam.com"),
-            from_name=config["email"].get("from_name", "Basalam")
-        )
-        manager.register_adapter(NotificationChannel.EMAIL, email_adapter)
     
     # Register SMS adapter
     if config.get("sms"):

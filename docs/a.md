@@ -305,7 +305,6 @@ Supplier Ships
 
 سیستم نوتیفیکیشن لازم داری.
 
-Email
 SMS
 In-app
 Webhook
@@ -775,7 +774,6 @@ shipping deadline
 
 channels
 
-email
 sms
 dashboard
 webhook
@@ -6638,7 +6636,6 @@ created_at
 
 delivery channels
 
-email
 sms
 dashboard
 webhook
@@ -7357,7 +7354,7 @@ Basalam SDK error classes وجود دارد و باید:
 
 🔹 Notification Engine
 
-    in‑app / email / SMS
+    in‑app / SMS
 
 🔹 Admin Tools
 
@@ -7801,7 +7798,7 @@ payment_sync
 
 سیستم Notification باید modular باشد تا:
 
-trigger(event) -> send email or SMS or In‑App
+trigger(event) -> send SMS or In‑App
 
 No direct coupling.
 ✅ Step 9 — Admin APIs
@@ -7948,7 +7945,7 @@ BASALAM_CLIENT_SECRET	from Basalam
 
     Redis credentials
 
-    Email/SMS API keys
+    SMS API keys
 
     Encryption keys
 

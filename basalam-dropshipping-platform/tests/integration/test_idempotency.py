@@ -25,7 +25,7 @@ class TestDuplicateEventHandling:
                 "order_id": "ord-12345",
                 "total_price": 99.99,
                 "currency": "USD",
-                "customer": {"email": "customer@example.com", "name": "Test Customer"},
+                "customer": {"phone": "09123456789", "name": "Test Customer"},
                 "items": [
                     {"variant_id": str(uuid.uuid4()), "quantity": 2, "price": 49.99}
                 ],
@@ -331,13 +331,13 @@ class TestDatabaseFallback:
 
         payload1 = {
             "order_id": "ord-123",
-            "customer": {"name": "Test", "email": "test@example.com"},
+            "customer": {"name": "Test", "phone": "09123456789"},
             "total": 100,
         }
 
         payload2 = {
             "total": 100,
-            "customer": {"email": "test@example.com", "name": "Test"},
+            "customer": {"phone": "09123456789", "name": "Test"},
             "order_id": "ord-123",
         }
 

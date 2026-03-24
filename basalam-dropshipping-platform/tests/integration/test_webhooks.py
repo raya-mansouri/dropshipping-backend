@@ -38,7 +38,7 @@ class TestWebhookSignatureValidation:
                 "id": "ext-123",
                 "total_price": 99.99,
                 "currency": "USD",
-                "customer": {"email": "test@example.com", "name": "Test Customer"},
+                "customer": {"phone": "09123456789", "name": "Test Customer"},
                 "items": [
                     {"variant_id": str(uuid.uuid4()), "quantity": 2, "price": 49.99}
                 ],

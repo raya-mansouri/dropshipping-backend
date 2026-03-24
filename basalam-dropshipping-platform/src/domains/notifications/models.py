@@ -1,7 +1,7 @@
 """
 Notifications Domain Models
 ==========================
-In-app, email, SMS, and webhook notifications
+In-app, SMS, and webhook notifications
 """
 from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Integer, Text, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
@@ -13,7 +13,6 @@ from enum import Enum
 
 class NotificationChannel(str, Enum):
     """Notification delivery channel"""
-    EMAIL = "email"
     SMS = "sms"
     IN_APP = "in_app"
     WEBHOOK = "webhook"
@@ -77,7 +76,6 @@ class NotificationPreference(Base, UUIDMixin, TimestampMixin):
     event_type = Column(String(50), nullable=False)  # order_created, inventory_low, etc.
     
     # Channels enabled for this event
-    email_enabled = Column(Boolean, default=True)
     sms_enabled = Column(Boolean, default=False)
     in_app_enabled = Column(Boolean, default=True)
     webhook_enabled = Column(Boolean, default=False)
@@ -102,9 +100,9 @@ class NotificationLog(Base, UUIDMixin):
     
     notification_id = Column(UUID(as_uuid=True), ForeignKey("notifications.id"))
     
-    channel = Column(String(20), nullable=False)  # email, sms, webhook
+    channel = Column(String(20), nullable=False)  # sms, webhook
     
-    recipient = Column(String(255))  # email, phone, or webhook URL
+    recipient = Column(String(255))  # phone, or webhook URL
     
     status = Column(String(20), default=NotificationStatus.PENDING.value)
     

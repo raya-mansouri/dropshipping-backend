@@ -3,11 +3,12 @@ Accounts Domain Schemas
 ======================
 Pydantic schemas for accounts API
 """
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from uuid import UUID
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional
 from enum import Enum
+from src.core.validators.phone import validate_iranian_phone
 
 
 # Enums
@@ -31,20 +32,39 @@ class UserRole(str, Enum):
 
 # User Schemas
 class UserBase(BaseModel):
-    email: EmailStr
+    """Base user schema - phone is the only identifier"""
+    phone: str
     full_name: Optional[str] = None
-    phone: Optional[str] = None
 
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8)
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        """Validate Iranian phone number format"""
+        is_valid, error = validate_iranian_phone(v)
+        if not is_valid:
+            raise ValueError(error)
+        return v
 
 
 class UserUpdate(BaseModel):
-    email: Optional[EmailStr] = None
-    full_name: Optional[str] = None
     phone: Optional[str] = None
+    full_name: Optional[str] = None
     is_active: Optional[bool] = None
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
+        """Validate Iranian phone number format if provided"""
+        if v is None:
+            return v
+        is_valid, error = validate_iranian_phone(v)
+        if not is_valid:
+            raise ValueError(error)
+        return v
 
 
 class UserResponse(UserBase):
@@ -97,9 +117,48 @@ class TokenData(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    phone: str
     password: str
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        """Validate Iranian phone number format"""
+        is_valid, error = validate_iranian_phone(v)
+        if not is_valid:
+            raise ValueError(error)
+        return v
 
 
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
+
+
+class PasswordResetRequest(BaseModel):
+    """Password reset using phone number"""
+    phone: str
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        """Validate Iranian phone number format"""
+        is_valid, error = validate_iranian_phone(v)
+        if not is_valid:
+            raise ValueError(error)
+        return v
+
+
+class PasswordResetConfirm(BaseModel):
+    """Confirm password reset with new password"""
+    phone: str
+    new_password: str = Field(..., min_length=8)
+    reset_token: str
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        """Validate Iranian phone number format"""
+        is_valid, error = validate_iranian_phone(v)
+        if not is_valid:
+            raise ValueError(error)
+        return v

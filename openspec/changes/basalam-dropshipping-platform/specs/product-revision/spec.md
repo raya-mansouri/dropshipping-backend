@@ -204,7 +204,7 @@ The system SHALL send timely notifications to sellers affected by revision statu
   - Title: "محصول در انتظار بازنگری"
   - Body: "محصول [نام محصول] توسط تامین‌کننده ویرایش شد و در انتظار تایید است"
   - Action: link to product in seller dashboard
-- **AND** send via: in-app, email, SMS (based on seller preferences)
+- **AND** send via: in-app, SMS (based on seller preferences)
 
 #### Scenario: Product rejected
 - **WHEN** product.revision.rejected webhook received

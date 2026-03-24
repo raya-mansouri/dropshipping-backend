@@ -7,8 +7,8 @@ FastAPI endpoints for authentication and user management
 from uuid import UUID
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr, Field
+from fastapi.security import OAuth2PasswordBearer
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timedelta
@@ -30,8 +30,10 @@ from src.domains.accounts.schemas import (
     Token,
     LoginRequest,
     RefreshTokenRequest,
+    PasswordResetRequest,
     UserRole,
 )
+from src.core.validators.phone import validate_iranian_phone
 
 
 # ============================================
@@ -141,23 +143,22 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     """
-    Register a new user
+    Register a new user using phone number
 
     Creates user account and returns access/refresh tokens
     """
-    result = await db.execute(select(User).where(User.email == user_data.email))
+    result = await db.execute(select(User).where(User.phone == user_data.phone))
     existing_user = result.scalar_one_or_none()
 
     if existing_user:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Phone number already registered"
         )
 
     user = User(
-        email=user_data.email,
+        phone=user_data.phone,
         password_hash=hash_password(user_data.password),
         full_name=user_data.full_name,
-        phone=user_data.phone,
         is_active=True,
         is_verified=False,
         role=UserRole.USER.value,
@@ -186,19 +187,18 @@ async def register_with_account(
 
     Creates user, account, and returns tokens
     """
-    result = await db.execute(select(User).where(User.email == user_data.email))
+    result = await db.execute(select(User).where(User.phone == user_data.phone))
     existing_user = result.scalar_one_or_none()
 
     if existing_user:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Phone number already registered"
         )
 
     user = User(
-        email=user_data.email,
+        phone=user_data.phone,
         password_hash=hash_password(user_data.password),
         full_name=user_data.full_name,
-        phone=user_data.phone,
         is_active=True,
         is_verified=False,
         role=UserRole.USER.value,
@@ -234,17 +234,17 @@ async def register_with_account(
 @router.post("/login", response_model=Token)
 async def login(login_data: LoginRequest, db: AsyncSession = Depends(get_db)):
     """
-    Login with email and password
+    Login with phone number and password
 
     Returns access and refresh tokens
     """
-    result = await db.execute(select(User).where(User.email == login_data.email))
+    result = await db.execute(select(User).where(User.phone == login_data.phone))
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(login_data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Incorrect phone number or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -306,8 +306,6 @@ async def refresh_token(
 async def logout(current_user: User = Depends(get_current_user)):
     """
     Logout (invalidate tokens client-side)
-
-    In production, you might want to blacklist the token
     """
     return {"message": "Successfully logged out"}
 
@@ -330,14 +328,15 @@ async def update_current_user(
     """Update current user profile"""
     update_dict = user_data.model_dump(exclude_unset=True)
 
-    if "email" in update_dict:
+    # Check for duplicate phone
+    if "phone" in update_dict and update_dict["phone"]:
         result = await db.execute(
             select(User).where(
-                User.email == update_dict["email"], User.id != current_user.id
+                User.phone == update_dict["phone"], User.id != current_user.id
             )
         )
         if result.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail="Email already in use")
+            raise HTTPException(status_code=400, detail="Phone number already in use")
 
     for field, value in update_dict.items():
         setattr(current_user, field, value)
@@ -374,27 +373,32 @@ async def change_password(
     return {"message": "Password changed successfully"}
 
 
-class PasswordResetRequest(BaseModel):
-    email: EmailStr
-
-
 @router.post("/forgot-password")
 async def forgot_password(
     reset_data: PasswordResetRequest, db: AsyncSession = Depends(get_db)
 ):
     """
-    Request password reset
+    Request password reset using phone number
 
-    In production, send reset email with token
+    In production, send reset code via SMS
     """
-    result = await db.execute(select(User).where(User.email == reset_data.email))
+    # Validate phone format
+    is_valid, error = validate_iranian_phone(reset_data.phone)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error
+        )
+    
+    result = await db.execute(select(User).where(User.phone == reset_data.phone))
     user = result.scalar_one_or_none()
 
     if user:
         reset_token = secrets.token_urlsafe(32)
-        # In production: send email with reset link
+        # In production: send SMS with reset code to phone number
 
-    return {"message": "If the email exists, a reset link has been sent"}
+    # Always return success message for security
+    return {"message": "If the phone number exists, a reset code has been sent"}
 
 
 class PasswordResetConfirmRequest(BaseModel):
@@ -409,7 +413,6 @@ async def reset_password(reset_data: PasswordResetConfirmRequest):
 
     In production: validate token and update password
     """
-    # In production: validate token from email
     return {"message": "Password reset successfully"}
 
 

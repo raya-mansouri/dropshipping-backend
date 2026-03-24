@@ -2,14 +2,15 @@
 Notification Integration Ports - Hexagonal Architecture
 =====================================================
 This is the PRIMARY ADAPTER interface.
-All notification types (SMS, Email, In-App, Webhook) implement this port.
+All notification types (SMS, In-App, Webhook) implement this port.
 """
 from abc import ABC, abstractmethod
 from datetime import datetime
 from uuid import UUID
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, Field
 from enum import Enum
+from src.core.validators.phone import validate_iranian_phone
 
 
 # ============================================
@@ -18,7 +19,6 @@ from enum import Enum
 
 class NotificationChannel(str, Enum):
     """Available notification channels"""
-    EMAIL = "email"
     SMS = "sms"
     IN_APP = "in_app"
     WEBHOOK = "webhook"
@@ -48,9 +48,19 @@ class NotificationContent(BaseModel):
 class NotificationRecipient(BaseModel):
     """Recipient information for notification"""
     user_id: Optional[UUID] = None
-    email: Optional[EmailStr] = None
     phone: Optional[str] = None
     webhook_url: Optional[str] = None
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
+        """Validate phone number if provided"""
+        if v is None:
+            return v
+        is_valid, error = validate_iranian_phone(v)
+        if not is_valid:
+            raise ValueError(f"Invalid phone number: {error}")
+        return v
 
 
 class NotificationRequest(BaseModel):
@@ -80,7 +90,7 @@ class NotificationPort(ABC):
     """
     PRIMARY PORT - Abstract interface for notification adapters
     
-    All notification adapters (Email, SMS, In-App, Webhook) MUST implement this port.
+    All notification adapters (SMS, In-App, Webhook) MUST implement this port.
     """
     
     @property

@@ -80,7 +80,6 @@ prometheus-client = "^0.19.0"
 # Utilities
 python-multipart = "^0.0.6"
 python-dotenv = "^1.0.0"
-pydantic[email] = "^2.6.0"
 ```
 
 ### Basalam Integration
@@ -102,9 +101,6 @@ minio = "^7.2.0"              # S3-compatible storage
 
 ### Notifications
 ```toml
-# Email
-emails = "^0.6"              # Email templates
-aiosmtplib = "^3.0.0"         # Async SMTP
 
 # SMS (example providers)
 kavenegar = "*"              # Iranian SMS provider
@@ -784,7 +780,7 @@ CREATE TABLE notifications (
     body TEXT,
     payload JSONB,
     status VARCHAR(20) DEFAULT 'pending',  -- 'pending', 'sent', 'read'
-    channel VARCHAR(20),                    -- 'email', 'sms', 'in_app', 'webhook'
+    channel VARCHAR(20),                    -- 'sms', 'in_app', 'webhook'
     sent_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT NOW()
 );
@@ -1092,16 +1088,6 @@ S3_PUBLIC_URL=http://localhost:9000/${S3_BUCKET}
 # ===========================================
 SENTRY_DSN=
 PROMETHEUS_ENABLED=true
-
-# ===========================================
-# Email (SMTP)
-# ===========================================
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=
-SMTP_PASSWORD=
-SMTP_FROM=noreply@yourdomain.com
-
 # ===========================================
 # SMS (Kavenegar)
 # ===========================================

@@ -21,7 +21,6 @@ def basalam_order_to_internal(payload: Dict[str, Any]) -> Dict[str, Any]:
             "id": str(payload.get("customer", {}).get("id")),
             "name": payload.get("customer", {}).get("name"),
             "phone": payload.get("customer", {}).get("phone"),
-            "email": payload.get("customer", {}).get("email"),
         },
         "items": [
             {
