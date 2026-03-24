@@ -68,6 +68,7 @@ class SupplierProduct(Base, UUIDMixin, TimestampMixin):
     # Relationships
     shop = relationship("Shop", back_populates="supplier_products")
     category = relationship("Category", back_populates="products")
+    product_variants = relationship("ProductVariant",back_populates="supplier_product",cascade="all, delete-orphan",)
     variants = relationship("SupplierVariant", back_populates="product", cascade="all, delete-orphan")
     images = relationship("ProductMedia", back_populates="product", cascade="all, delete-orphan")
     seller_listings = relationship("SellerListing", back_populates="supplier_product")
@@ -94,8 +95,8 @@ class ProductVariant(Base, UUIDMixin, TimestampMixin):
     attributes = Column(JSONB, default=dict)  # {"color": "red", "size": "XL"}
     
     # Relationships
-    product = relationship("SupplierProduct", back_populates="variants")
-    supplier_variants = relationship("SupplierVariant", back_populates="variant")
+    supplier_product = relationship("SupplierProduct", back_populates="product_variants")
+    supplier_variants = relationship("SupplierVariant", back_populates="variant", cascade="all, delete-orphan")
     order_items = relationship("OrderItem", back_populates="variant")
 
 
