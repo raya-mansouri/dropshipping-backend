@@ -7,6 +7,7 @@ FastAPI endpoints for monitoring service health
 from typing import Dict, Any
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from src.core.config import get_settings
 from src.core.database import async_session_maker
@@ -30,7 +31,7 @@ async def check_database() -> DependencyHealth:
     """Check database connection"""
     try:
         async with async_session_maker() as session:
-            await session.execute("SELECT 1")
+            await session.execute(text("SELECT 1"))
         return DependencyHealth(status="healthy", message="Database connection OK")
     except Exception as e:
         return DependencyHealth(status="unhealthy", message=f"Database error: {str(e)}")
