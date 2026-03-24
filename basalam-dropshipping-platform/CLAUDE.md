@@ -42,7 +42,7 @@ service/           # Business logic — depends on repos, never on HTTP
 ### Integrations (`src/integrations/`)
 Uses **Ports & Adapters** (hexagonal) pattern:
 - `shop/ports.py` → interfaces → `shop/connectors/` (Basalam, Shopify, WooCommerce)
-- `notification/ports.py` → interfaces → `notification/adapters/` (email, sms, in_app, webhook)
+- `notification/ports.py` → interfaces → `notification/adapters/` (sms, in_app, webhook)
 - `basalam/` — Basalam-specific client, rate limiter, retry, product sync, image service
 - `webhooks/` — Idempotency, retry, processors per event type (inventory, order, payment, product)
 

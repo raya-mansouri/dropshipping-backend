@@ -240,3 +240,150 @@ npm install -g uipro-cli          # UI/UX Pro CLI (offline skill install)
 - [keon/Awesome-Context-Engineering](https://github.com/keon/Awesome-Context-Engineering) — Context engineering survey
 - [antigravity.codes/agent-skills](https://antigravity.codes/agent-skills) — Browse 500+ skills online
 - [anthropics/claude-plugins-official](https://github.com/anthropics/claude-plugins-official) — Official Anthropic plugins
+
+## Available Claude Code Skills
+
+Skills installed from starred repositories, providing specialized capabilities for development:
+
+### FastAPI / Python
+- `fastapi-pro`
+- `fastapi-router-py`
+- `fastapi-templates`
+- `python-pro`
+- `python-fastapi-development`
+- `python-development-python-scaffold`
+- `python-patterns`
+- `python-performance-optimization`
+- `python-testing-patterns`
+- `python-packaging`
+- `async-python-patterns`
+
+### Backend
+- `backend-architect`
+- `backend-development-feature-development`
+- `backend-dev-guidelines`
+- `backend-security-coder`
+- `docker-expert`
+
+### Database / PostgreSQL
+- `postgres-best-practices`
+- `postgresql`
+- `postgresql-optimization`
+- `database`
+- `database-admin`
+
+### API Design
+- `api-design-principles`
+- `api-documentation`
+- `api-patterns`
+- `api-security-best-practices`
+- `api-security-testing`
+
+### Context Engineering
+- `context-driven-development`
+- `context-fundamentals`
+- `context-manager`
+- `context-optimization`
+- `context-window-management`
+- `context-compression`
+
+### Code Review
+- `code-reviewer`
+- `code-review-checklist`
+- `code-review-excellence`
+- `requesting-code-review`
+- `receiving-code-review`
+
+### Git
+- `git-advanced-workflows`
+- `git-pr-workflows-git-workflow`
+- `git-pr-workflows-pr-enhance`
+- `git-pushing`
+
+### Security
+- `security-scanning-security-sast`
+- `security-scanning-security-hardening`
+- `security-scanning-security-dependencies`
+
+### Planning / Agents
+- `planning-with-files`
+- `agents-md`
+- `agent-orchestration-multi-agent-optimize`
+
+Additional skills from other sources: PDF, PPTX, Excel, DOCX, frontend, fullstack, Android, iOS, shader, UI/UX design intelligence (50+ styles, 161 reasoning rules), git commit/push/PR commands, security best practices, Sentry issue tracking, code search/understanding, Python type checking, GitHub integration, frontend design intelligence, feature development workflow, semantic code editing, Claude Agent SDK development, PR review with specialized agents, E2E testing, autonomous agent loop, hook creation/management, Vercel deployment, plugin development, coding standards, TDD, security, E2E, backend/frontend patterns.
+
+## Installed Plugins
+
+Plugins providing extended functionality for Claude Code:
+
+| Plugin | Source | Description |
+|--------|--------|-------------|
+| `minimax-skills` | MiniMax-AI/skills | PDF, PPTX, Excel, DOCX, frontend, fullstack, Android, iOS, shader |
+| `ui-ux-pro-max` | nextlevelbuilder/ui-ux-pro-max-skill | UI/UX design intelligence — 50+ styles, 161 reasoning rules |
+| `commit-commands` | claude-plugins-official | git commit, push, PR commands |
+| `security-guidance` | claude-plugins-official | Security best practices |
+| `sentry` | claude-plugins-official | Sentry issue tracking |
+| `greptile` | claude-plugins-official | Code search/understanding |
+| `pyright-lsp` | claude-plugins-official | Python type checking |
+| `github` | claude-plugins-official | GitHub integration |
+| `frontend-design` | claude-plugins-official | Frontend design intelligence |
+| `feature-dev` | claude-plugins-official | Feature development workflow |
+| `serena` | claude-plugins-official | Semantic code editing |
+| `agent-sdk-dev` | claude-plugins-official | Claude Agent SDK development |
+| `pr-review-toolkit` | claude-plugins-official | PR review with specialized agents |
+| `playwright` | claude-plugins-official | E2E testing |
+| `ralph-wiggum` | claude-plugins-official | Autonomous agent loop |
+| `hookify` | claude-plugins-official | Hook creation/management |
+| `vercel` | claude-plugins-official | Vercel deployment |
+| `plugin-dev` | claude-plugins-official | Plugin development |
+| `everything-claude-code` | everything-claude-code | Coding standards, TDD, security, E2E, backend/frontend patterns |
+| `claude-mem` | thedotmack/claude-mem | Auto-captures sessions → compresses with AI → injects into future sessions |
+| `claude-hud` | jarrodwatts/claude-hud | Real-time HUD: context bar, tools, agent status, todo progress |
+| `planning-with-files` | OthmanAdi/planning-with-files | Manus-style persistent markdown planning (task_plan.md, findings.md, progress.md) |
+| `visual-explainer` | nicobailon/visual-explainer | Terminal output → styled HTML pages & slides with Mermaid diagrams |
+| `pg` (pg-aiguide) | timescale/pg-aiguide | PostgreSQL docs search + best-practice skills (4× more constraints) |
+| `understand-anything` | Lum1104/Understand-Anything | Multi-agent codebase analysis with interactive knowledge graph |
+| `superpowers` | obra/superpowers | Brainstorming, planning, TDD, debugging, code review, worktree skills |
+| `python-development` | wshobson/agents | Python pro, django-pro, fastapi-pro agents |
+| `backend-development` | wshobson/agents | Backend architect + agents |
+| `database-design` | wshobson/agents | Database architect agents |
+| `security-scanning` | wshobson/agents | Security auditor agents |
+| `comprehensive-review` | wshobson/agents | Architect-review, code-reviewer, security-auditor agents |
+| `tdd-workflows` | wshobson/agents | TDD workflow agents |
+| `productivity` | anthropics/knowledge-work-plugins | Official Anthropic productivity plugin |
+| `data` | anthropics/knowledge-work-plugins | Official Anthropic data plugin |
+| `product-management` | anthropics/knowledge-work-plugins | Official Anthropic PM plugin |
+
+## MCP Servers
+
+Model Context Protocol (MCP) servers providing external data and tools:
+
+| Server | Repo | Description |
+|--------|------|-------------|
+| Official MCP servers | modelcontextprotocol/servers | Filesystem, GitHub, Slack, etc. |
+| MCP registry | modelcontextprotocol/registry | Discover community MCP servers |
+| PostgreSQL guide | timescale/pg-aiguide | PostgreSQL docs semantic search |
+| Graphiti | getzep/graphiti | Real-time knowledge graphs for agents |
+| Cognee | topoteretes/cognee | Knowledge engine — 6-line agent memory |
+| Excalidraw MCP | excalidraw/excalidraw-mcp | Diagramming inside Claude |
+| Supermemory | supermemoryai/supermemory | Fast scalable memory engine |
+| Hindsight | vectorize-io/hindsight | Agent memory that learns |
+| Sentry MCP | getsentry/sentry-mcp | Sentry issue management |
+| Microsoft Docs MCP | MicrosoftDocs/mcp | Microsoft Learn docs |
+| IBM MCP | IBM/mcp | IBM services collection |
+| PostgreSQL best practices | timescale/pg-aiguide | PostgreSQL best practices |
+
+## Prompt Patterns and Rules
+
+Prompt patterns and rules from starred repositories for enhanced AI interactions:
+
+| Resource | Repo | Description |
+|----------|------|-------------|
+| Fabric | danielmiessler/Fabric | 200+ prompt patterns — copy as skills or rules |
+| Telos | danielmiessler/Telos | Deep context framework — reference for CLAUDE.md structure |
+| AGENTS.md | agentsmd/agents.md | AGENTS.md format spec — created AGENTS.md this session |
+| Claude Code best practices | shanraisshan/claude-code-best-practice | Reference for CLAUDE.md |
+| Ultimate guide | FlorianBruniaux/claude-code-ultimate-guide | Comprehensive Claude Code guide |
+| System prompts | x1xhlol/system-prompts-and-models-of-ai-tools | System prompt leaks — reference |
+| System prompts collection | asgeirtj/system_prompts_leaks | System prompt collection — reference |
+| Prompt decorators | smkalami/prompt-decorators | Prompt decorators (+++Reason) — add to system prompt |

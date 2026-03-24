@@ -29,7 +29,7 @@ This is a **greenfield project** creating a comprehensive dropshipping platform 
 - `order-lifecycle`: Complete order state machine from creation to delivery confirmation
 - `payment-escrow`: Hold-and-release payment flow protecting both seller and supplier
 - `shipping-integration`: Handle multiple shipping types with tracking and delivery confirmation logic
-- `notification-system`: Multi-channel notifications (email, SMS, in-app, webhook) for key events
+- `notification-system`: Multi-channel notifications (SMS, in-app, webhook) for key events
 - `forbidden-product-detection`: Validate products against Basalam policies and flag prohibited items
 - `admin-operations`: Fraud detection, dispute resolution, refund processing, and manual overrides
 - `webhook-reliability`: Idempotent webhook processing with retry logic and dead-letter queue
