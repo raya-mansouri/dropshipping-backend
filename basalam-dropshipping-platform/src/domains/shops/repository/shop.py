@@ -4,13 +4,13 @@ Shop Repository
 Repository for Shop model operations, extending BaseRepository.
 """
 
-from typing import List
+from typing import List, Optional
 import uuid
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.repository.base import BaseRepository
-from ..models import Shop
+from ..models import Shop, Account
 
 
 class ShopRepository(BaseRepository[Shop]):
@@ -51,6 +51,26 @@ class ShopRepository(BaseRepository[Shop]):
         """Get all shops with a given role across all accounts."""
         result = await self.session.execute(
             select(Shop).where(Shop.shop_role == role)
+        )
+        return list(result.scalars().all())
+
+    async def get_by_id_and_owner(
+        self, shop_id: uuid.UUID, user_id: uuid.UUID
+    ) -> Optional[Shop]:
+        """Get a shop only if it belongs to an account owned by the given user."""
+        result = await self.session.execute(
+            select(Shop)
+            .join(Account, Shop.account_id == Account.id)
+            .where(Shop.id == shop_id, Account.owner_user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_owner(self, user_id: uuid.UUID) -> List[Shop]:
+        """Get all shops belonging to accounts owned by the given user."""
+        result = await self.session.execute(
+            select(Shop)
+            .join(Account, Shop.account_id == Account.id)
+            .where(Account.owner_user_id == user_id)
         )
         return list(result.scalars().all())
 

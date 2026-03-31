@@ -16,6 +16,8 @@ from sqlalchemy import select
 from src.core.config import get_settings
 from src.core.database import async_session_maker
 from src.domains.accounts.models import User
+from src.domains.accounts.repository.account import AccountRepository
+from src.domains.shops.repository.shop import ShopRepository
 
 
 SECRET_KEY = get_settings().secret_key.get_secret_value()
@@ -117,3 +119,35 @@ def require_role(*roles: str):
         return current_user
 
     return role_checker
+
+
+# ---- Ownership Dependencies ----
+
+
+async def verify_account_ownership(
+    account_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Verify the account belongs to the current user."""
+    repo = AccountRepository(db)
+    account = await repo.get_by_id_and_owner(account_id, current_user.id)
+    if not account:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not owned by current user",
+        )
+    return account
+
+
+async def verify_shop_ownership(
+    shop_id: UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Verify the shop belongs to an account owned by the current user."""
+    repo = ShopRepository(db)
+    shop = await repo.get_by_id_and_owner(shop_id, current_user.id)
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    return shop
