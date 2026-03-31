@@ -154,10 +154,8 @@ class IntegrationService:
                 )
 
             except Exception as e:
-                # Webhook registration failed - delete integration and raise error
+                # Webhook registration failed — UnitOfWork will roll back the integration creation
                 logger.error(f"Webhook registration failed: {e}")
-                await self._integration_repository.delete(integration.id)
-
                 raise WebhookRegistrationError(
                     f"Failed to register webhooks with {platform_code}: {str(e)}"
                 ) from e

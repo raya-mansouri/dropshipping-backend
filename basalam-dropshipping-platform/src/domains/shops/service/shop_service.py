@@ -6,13 +6,11 @@ Business logic for shop management
 
 from typing import List, Optional, Dict, Any
 import uuid
-from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..repository import ShopRepository
 from ..models import Shop
-from ..schemas import ShopRole
 
 
 VALID_ROLES = {"supplier", "seller"}
@@ -109,11 +107,7 @@ class ShopService:
         Returns:
             List of all Shop instances with role 'supplier'
         """
-        result = await self.session.execute(
-            Shop.__table__.select().where(Shop.shop_role == "supplier")
-        )
-        rows = result.fetchall()
-        return [Shop(**dict(row._mapping)) for row in rows] if rows else []
+        return await self._repository.get_by_role_global("supplier")
 
     async def list_sellers(self) -> List[Shop]:
         """
@@ -122,11 +116,7 @@ class ShopService:
         Returns:
             List of all Shop instances with role 'seller'
         """
-        result = await self.session.execute(
-            Shop.__table__.select().where(Shop.shop_role == "seller")
-        )
-        rows = result.fetchall()
-        return [Shop(**dict(row._mapping)) for row in rows] if rows else []
+        return await self._repository.get_by_role_global("seller")
 
     async def update_shop(
         self, shop_id: uuid.UUID, data: Dict[str, Any]

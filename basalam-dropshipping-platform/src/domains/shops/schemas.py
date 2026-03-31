@@ -6,7 +6,7 @@ Pydantic schemas for shops API
 from pydantic import BaseModel, Field, ConfigDict
 from uuid import UUID
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional
 from enum import Enum
 
 
@@ -122,3 +122,18 @@ class SyncJobResponse(BaseModel):
 
 class TriggerSyncRequest(BaseModel):
     entity_type: str = Field(..., pattern="^(product|inventory|order)$")
+
+
+# API Request/Response (used by routes)
+class ConnectRequest(BaseModel):
+    """Request to connect to a platform"""
+    platform_code: str = Field(..., pattern="^(basalam|shopify|woocommerce)$")
+    connection_type: str = Field(..., pattern="^(oauth|api|token)$")
+    credentials: dict = {}
+
+
+class OAuthStartResponse(BaseModel):
+    """OAuth authorization URL response"""
+    authorize_url: str
+    state: str
+    integration_id: UUID
