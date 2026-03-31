@@ -1,9 +1,8 @@
 """
-Retry Scheduler
-==============
+Webhook Retry Scheduler
+=======================
 Schedules and manages webhook retry attempts with exponential backoff.
 """
-
 import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -11,13 +10,11 @@ from typing import List, Optional
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from pydantic import BaseModel
-
 
 logger = logging.getLogger(__name__)
 
 
-class RetrySchedule(BaseModel):
+class RetrySchedule:
     """Configuration for retry schedule"""
 
     intervals: List[int] = [
@@ -77,7 +74,7 @@ class RetryScheduler:
             payload: The original webhook payload
 
         Returns:
-            True if retry was scheduled successfully
+            True if retry was scheduled successfully, False if max retries exceeded
         """
         if attempt >= self.MAX_ATTEMPTS:
             logger.warning(f"Max retry attempts reached for event {event_id}")
@@ -113,14 +110,23 @@ class RetryScheduler:
         scheduled_at: datetime,
     ) -> None:
         """Save retry record to database"""
-        from src.domains.webhooks.models import WebhookRetry
+        from src.domains.webhooks.models import WebhookRetrySchedule, WebhookEvent
 
-        retry = WebhookRetry(
-            event_id=event_id,
+        # Update webhook event
+        stmt = (
+            update(WebhookEvent)
+            .where(WebhookEvent.id == event_id)
+            .values(
+                retry_count=attempt,
+                status="retrying",
+            )
+        )
+        await self.db_session.execute(stmt)
+
+        # Create retry schedule record
+        retry = WebhookRetrySchedule(
+            webhook_event_id=event_id,
             attempt=attempt,
-            platform_id=platform_id,
-            event_type=event_type,
-            payload=payload,
             scheduled_at=scheduled_at,
             status="pending",
         )
@@ -128,16 +134,31 @@ class RetryScheduler:
         await self.db_session.commit()
 
     async def _mark_as_failed(self, event_id: str) -> None:
-        """Mark event as permanently failed"""
-        from src.domains.webhooks.models import WebhookRetry
+        """Mark event as permanently failed and move to DLQ"""
+        from src.domains.webhooks.models import WebhookEvent, WebhookDeadLetter
 
-        stmt = (
-            update(WebhookRetry)
-            .where(WebhookRetry.event_id == event_id)
-            .values(status="failed")
-        )
-        await self.db_session.execute(stmt)
-        await self.db_session.commit()
+        # Get webhook event
+        stmt = select(WebhookEvent).where(WebhookEvent.id == event_id)
+        result = await self.db_session.execute(stmt)
+        webhook_event = result.scalar_one_or_none()
+
+        if webhook_event:
+            # Update event status
+            webhook_event.status = "dlq"
+
+            # Create DLQ entry
+            dlq_entry = WebhookDeadLetter(
+                webhook_event_id=event_id,
+                original_event_type=webhook_event.event_type,
+                payload=webhook_event.payload,
+                failure_reason=webhook_event.error_message or "Max retries exceeded",
+                failure_count=webhook_event.retry_count,
+                status="pending",
+            )
+            self.db_session.add(dlq_entry)
+            await self.db_session.commit()
+
+            logger.warning(f"Event {event_id} moved to dead letter queue")
 
     async def get_pending_retries(self) -> List[dict]:
         """
@@ -149,47 +170,67 @@ class RetryScheduler:
         if not self.db_session:
             return []
 
-        from src.domains.webhooks.models import WebhookRetry
+        from src.domains.webhooks.models import WebhookRetrySchedule, WebhookEvent
 
         now = datetime.utcnow()
-        stmt = select(WebhookRetry).where(
-            WebhookRetry.status == "pending", WebhookRetry.scheduled_at <= now
+        stmt = (
+            select(WebhookRetrySchedule, WebhookEvent)
+            .join(WebhookEvent, WebhookRetrySchedule.webhook_event_id == WebhookEvent.id)
+            .where(
+                WebhookRetrySchedule.status == "pending",
+                WebhookRetrySchedule.scheduled_at <= now,
+            )
         )
         result = await self.db_session.execute(stmt)
-        retries = result.scalars().all()
+        rows = result.all()
 
         return [
             {
-                "id": r.id,
-                "event_id": r.event_id,
-                "attempt": r.attempt,
-                "platform_id": r.platform_id,
-                "event_type": r.event_type,
-                "payload": r.payload,
+                "retry_id": str(retry.id),
+                "event_id": str(event.id),
+                "attempt": retry.attempt,
+                "platform_id": str(event.platform_id),
+                "event_type": event.event_type,
+                "payload": event.payload,
             }
-            for r in retries
+            for retry, event in rows
         ]
 
-    async def mark_retry_complete(self, retry_id: int) -> None:
+    async def mark_retry_complete(self, retry_id: str) -> None:
         """Mark a retry as completed"""
-        from src.domains.webhooks.models import WebhookRetry
+        from src.domains.webhooks.models import WebhookRetrySchedule, WebhookEvent
 
         stmt = (
-            update(WebhookRetry)
-            .where(WebhookRetry.id == retry_id)
-            .values(status="completed")
+            update(WebhookRetrySchedule)
+            .where(WebhookRetrySchedule.id == retry_id)
+            .values(status="executed", executed_at=datetime.utcnow())
         )
         await self.db_session.execute(stmt)
+
+        # Also update the webhook event
+        # Get the retry first to find the event
+        retry_stmt = select(WebhookRetrySchedule).where(WebhookRetrySchedule.id == retry_id)
+        result = await self.db_session.execute(retry_stmt)
+        retry = result.scalar_one_or_none()
+
+        if retry:
+            event_stmt = (
+                update(WebhookEvent)
+                .where(WebhookEvent.id == retry.webhook_event_id)
+                .values(status="completed", processed_at=datetime.utcnow())
+            )
+            await self.db_session.execute(event_stmt)
+
         await self.db_session.commit()
 
-    async def mark_retry_failed(self, retry_id: int) -> None:
+    async def mark_retry_failed(self, retry_id: str, error: str) -> None:
         """Mark a retry as failed (will be retried again if attempts remain)"""
-        from src.domains.webhooks.models import WebhookRetry
+        from src.domains.webhooks.models import WebhookRetrySchedule
 
         stmt = (
-            update(WebhookRetry)
-            .where(WebhookRetry.id == retry_id)
-            .values(status="failed")
+            update(WebhookRetrySchedule)
+            .where(WebhookRetrySchedule.id == retry_id)
+            .values(status="failed", error=error, executed_at=datetime.utcnow())
         )
         await self.db_session.execute(stmt)
         await self.db_session.commit()

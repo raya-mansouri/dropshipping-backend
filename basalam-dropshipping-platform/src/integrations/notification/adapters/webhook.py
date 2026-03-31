@@ -4,13 +4,16 @@ Webhook Notification Adapter
 Implements NotificationPort for webhook notifications
 
 Sends notifications to external systems via HTTP webhooks
+with retry logic and dead letter queue support.
 """
 import httpx
 import hmac
 import hashlib
 import json
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
+from uuid import UUID
 
 from ..ports import (
     NotificationPort,
@@ -18,6 +21,18 @@ from ..ports import (
     NotificationRequest,
     NotificationResponse,
 )
+from src.core.webhook_metrics import (
+    record_outgoing_sent,
+    record_outgoing_failed,
+)
+
+
+logger = logging.getLogger(__name__)
+
+
+# Retry intervals: 1m, 5m, 15m, 1h, 6h
+RETRY_INTERVALS = [60, 300, 900, 3600, 21600]
+MAX_RETRIES = 5
 
 
 class WebhookNotificationAdapter(NotificationPort):
@@ -26,19 +41,29 @@ class WebhookNotificationAdapter(NotificationPort):
     
     Sends notifications to external URLs via HTTP POST
     Used for notifying seller stores about order events
+
+    Features:
+    - HMAC-SHA256 signature generation
+    - Retry with exponential backoff
+    - Dead letter queue for permanent failures
+    - Logging to OutgoingWebhookLog table
     """
     
     def __init__(
         self,
         secret_key: str = "",
         default_headers: Optional[Dict[str, str]] = None,
-        timeout: float = 30.0
+        timeout: float = 30.0,
+        db_session=None,
+        integration_id: Optional[UUID] = None,
     ):
         self.secret_key = secret_key
         self.default_headers = default_headers or {
             "Content-Type": "application/json"
         }
         self.timeout = timeout
+        self.db_session = db_session
+        self.integration_id = integration_id
     
     @property
     def channel(self) -> NotificationChannel:
@@ -49,16 +74,18 @@ class WebhookNotificationAdapter(NotificationPort):
         return "webhook"
     
     async def send(self, request: NotificationRequest) -> NotificationResponse:
-        """Send webhook notification to external URL"""
+        """Send webhook notification to external URL with retry logging"""
         if not request.recipient.webhook_url:
             return NotificationResponse(
                 success=False,
                 error="No webhook URL provided",
                 provider=self.provider_name
             )
+
+        event_type = request.content.template_id or "notification"
         
         payload = {
-            "event": request.content.template_id or "notification",
+            "event": event_type,
             "timestamp": datetime.utcnow().isoformat(),
             "data": {
                 "title": request.content.title,
@@ -75,9 +102,18 @@ class WebhookNotificationAdapter(NotificationPort):
         headers = {
             **self.default_headers,
             "X-Webhook-Signature": signature,
-            "X-Webhook-Event": request.content.template_id or "notification"
+            "X-Webhook-Event": event_type
         }
-        
+
+        # Create log entry if db_session provided
+        log_id = None
+        if self.db_session and self.integration_id:
+            log_id = await self._create_webhook_log(
+                event_type=event_type,
+                payload=payload,
+                url=request.recipient.webhook_url,
+            )
+
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
@@ -87,28 +123,91 @@ class WebhookNotificationAdapter(NotificationPort):
                 )
                 
                 if response.status_code in [200, 201, 202]:
+                    # Mark as sent
+                    if log_id:
+                        await self._update_webhook_log(
+                            log_id=log_id,
+                            status="sent",
+                            response_status_code=response.status_code,
+                        )
+
+                    record_outgoing_sent(
+                        integration_type="webhook",
+                        event_type=event_type,
+                    )
+
                     return NotificationResponse(
                         success=True,
                         message_id=f"webhook_{datetime.utcnow().timestamp()}",
                         provider=self.provider_name
                     )
-                else:
+
+                elif response.status_code >= 500:
+                    # Server error - schedule retry
+                    error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+
+                    record_outgoing_failed(
+                        integration_type="webhook",
+                        event_type=event_type,
+                        status_code=response.status_code,
+                    )
+
+                    if log_id:
+                        await self._schedule_retry(
+                            log_id=log_id,
+                            error=error_msg,
+                            response_status_code=response.status_code,
+                        )
+
                     return NotificationResponse(
                         success=False,
-                        error=f"HTTP {response.status_code}: {response.text[:200]}",
+                        error=error_msg,
+                        provider=self.provider_name
+                    )
+
+                else:
+                    # 4xx error - permanent failure, move to DLQ
+                    error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+
+                    if log_id:
+                        await self._move_to_dlq(
+                            log_id=log_id,
+                            failure_reason=error_msg,
+                            response_status_code=response.status_code,
+                        )
+
+                    return NotificationResponse(
+                        success=False,
+                        error=error_msg,
                         provider=self.provider_name
                     )
                     
-        except httpx.TimeoutException:
+        except httpx.TimeoutException as e:
+            error_msg = f"Request timeout: {e}"
+
+            if log_id:
+                await self._schedule_retry(
+                    log_id=log_id,
+                    error=error_msg,
+                )
+
             return NotificationResponse(
                 success=False,
-                error="Request timeout",
+                error=error_msg,
                 provider=self.provider_name
             )
         except Exception as e:
+            error_msg = str(e)
+
+            if log_id:
+                await self._schedule_retry(
+                    log_id=log_id,
+                    error=error_msg,
+                )
+
             return NotificationResponse(
                 success=False,
-                error=str(e),
+                error=error_msg,
                 provider=self.provider_name
             )
     
@@ -163,3 +262,154 @@ class WebhookNotificationAdapter(NotificationPort):
         ).hexdigest()
         
         return f"sha256={signature}"
+
+    async def _create_webhook_log(
+        self,
+        event_type: str,
+        payload: Dict[str, Any],
+        url: str,
+    ) -> Optional[str]:
+        """Create OutgoingWebhookLog entry"""
+        try:
+            from src.domains.webhooks.models import OutgoingWebhookLog, OutgoingWebhookStatus
+
+            log = OutgoingWebhookLog(
+                integration_id=self.integration_id,
+                event_type=event_type,
+                payload=payload,
+                url=url,
+                status=OutgoingWebhookStatus.PENDING.value,
+                retry_count=0,
+                max_retries=MAX_RETRIES,
+            )
+            self.db_session.add(log)
+            await self.db_session.commit()
+
+            logger.debug(f"Created outgoing webhook log {log.id}")
+            return str(log.id)
+
+        except Exception as e:
+            logger.error(f"Failed to create webhook log: {e}")
+            return None
+
+    async def _update_webhook_log(
+        self,
+        log_id: str,
+        status: str,
+        response_status_code: Optional[int] = None,
+    ):
+        """Update webhook log status"""
+        try:
+            from src.domains.webhooks.models import OutgoingWebhookLog
+            from sqlalchemy import update
+
+            stmt = (
+                update(OutgoingWebhookLog)
+                .where(OutgoingWebhookLog.id == log_id)
+                .values(
+                    status=status,
+                    last_attempt_at=datetime.utcnow(),
+                    response_status_code=response_status_code,
+                )
+            )
+            await self.db_session.execute(stmt)
+            await self.db_session.commit()
+
+        except Exception as e:
+            logger.error(f"Failed to update webhook log {log_id}: {e}")
+
+    async def _schedule_retry(
+        self,
+        log_id: str,
+        error: str,
+        response_status_code: Optional[int] = None,
+    ):
+        """Schedule retry for failed webhook"""
+        try:
+            from src.domains.webhooks.models import OutgoingWebhookLog, OutgoingWebhookStatus
+            from sqlalchemy import update, select
+
+            # Get current retry count
+            stmt = select(OutgoingWebhookLog.retry_count).where(
+                OutgoingWebhookLog.id == log_id
+            )
+            result = await self.db_session.execute(stmt)
+            retry_count = result.scalar() or 0
+
+            new_retry_count = retry_count + 1
+
+            if new_retry_count >= MAX_RETRIES:
+                # Move to DLQ
+                await self._move_to_dlq(log_id, error, response_status_code)
+            else:
+                # Schedule next retry
+                next_retry_at = datetime.utcnow() + timedelta(
+                    seconds=RETRY_INTERVALS[min(retry_count, len(RETRY_INTERVALS) - 1)]
+                )
+
+                stmt = (
+                    update(OutgoingWebhookLog)
+                    .where(OutgoingWebhookLog.id == log_id)
+                    .values(
+                        status=OutgoingWebhookStatus.RETRYING.value,
+                        retry_count=new_retry_count,
+                        last_attempt_at=datetime.utcnow(),
+                        next_retry_at=next_retry_at,
+                        last_error=error[:500] if error else None,
+                        response_status_code=response_status_code,
+                    )
+                )
+                await self.db_session.execute(stmt)
+                await self.db_session.commit()
+
+                logger.info(
+                    f"Scheduled retry {new_retry_count}/{MAX_RETRIES} for webhook {log_id} "
+                    f"at {next_retry_at}"
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to schedule retry for webhook {log_id}: {e}")
+
+    async def _move_to_dlq(
+        self,
+        log_id: str,
+        failure_reason: str,
+        response_status_code: Optional[int] = None,
+    ):
+        """Move failed webhook to dead letter queue"""
+        try:
+            from src.domains.webhooks.models import (
+                OutgoingWebhookLog,
+                OutgoingWebhookDLQ,
+                OutgoingWebhookStatus,
+            )
+            from sqlalchemy import update
+
+            # Update webhook log status
+            stmt = (
+                update(OutgoingWebhookLog)
+                .where(OutgoingWebhookLog.id == log_id)
+                .values(
+                    status=OutgoingWebhookStatus.FAILED.value,
+                    last_attempt_at=datetime.utcnow(),
+                    last_error=failure_reason[:500] if failure_reason else None,
+                    response_status_code=response_status_code,
+                )
+            )
+            await self.db_session.execute(stmt)
+
+            # Create DLQ entry
+            dlq_entry = OutgoingWebhookDLQ(
+                outgoing_webhook_log_id=log_id,
+                failure_reason=failure_reason[:1000] if failure_reason else "Unknown error",
+                failure_count=MAX_RETRIES,
+                status="pending",
+            )
+            self.db_session.add(dlq_entry)
+
+            await self.db_session.commit()
+
+            logger.warning(f"Moved webhook {log_id} to dead letter queue")
+
+        except Exception as e:
+            logger.error(f"Failed to move webhook {log_id} to DLQ: {e}")

@@ -5,7 +5,7 @@ Platforms, shops, and integrations
 
 IMPORTANT: shop_role is ONLY 'supplier' OR 'seller' (not both) per a.md
 """
-from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, UniqueConstraint, Integer
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from src.core.database import Base, TimestampMixin, UUIDMixin
@@ -23,6 +23,10 @@ class Platform(Base, UUIDMixin, TimestampMixin):
     code = Column(String(50), unique=True, nullable=False, index=True)  # basalam, shopify, woocommerce
     name = Column(String(255), nullable=False)
     platform_type = Column(String(50), nullable=False)  # marketplace, seller_system, supplier_system
+    
+    webhook_allowed_ips = Column(JSONB, default=list)  # ["192.168.1.0/24", "10.0.0.1"]
+    webhook_rate_limit = Column(JSONB, default=lambda: {"rate": 100, "period": 60})
+    webhook_timestamp_tolerance = Column(Integer, default=300)  # seconds, default 5 min
     
     # Relationships
     integrations = relationship("ShopIntegration", back_populates="platform")
@@ -71,6 +75,12 @@ class ShopIntegration(Base, UUIDMixin, TimestampMixin):
     connection_type = Column(String(20), nullable=False)  # oauth, api, token, manual
     credentials_encrypted = Column(JSONB)  # Encrypted tokens/keys
     webhook_id = Column(String(255))  # Registered webhook ID on platform
+    webhook_secret_encrypted = Column(String(512))  # Fernet-encrypted webhook secret
+    webhook_status = Column(String(30), default="not_registered")  # active, inactive, not_registered, cleanup_failed
+    webhook_registered_at = Column(DateTime)
+    webhook_previous_secret_encrypted = Column(String(512))  # Previous secret during rotation
+    webhook_secret_rotated_at = Column(DateTime)  # When rotation started
+    webhook_previous_secret_expires_at = Column(DateTime)  # When old secret stops being valid
     
     status = Column(String(20), default="connected")  # connected, disconnected, error
     last_sync_started_at = Column(DateTime)

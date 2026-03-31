@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from src.api.v1 import auth, orders, products, shops, health
+from src.api.v1 import webhooks, webhook_health
 from src.core.config import get_settings
 
 # Configure basic logging
@@ -90,6 +91,8 @@ app.include_router(orders.router, prefix="/api/v1")
 app.include_router(products.router, prefix="/api/v1")
 app.include_router(shops.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
+app.include_router(webhooks.router, prefix="/api/v1")
+app.include_router(webhook_health.router, prefix="/api/v1")
 
 
 # ============================================

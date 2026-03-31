@@ -1,10 +1,8 @@
 """
-Idempotency Manager
-==================
-Ensures webhook events are processed exactly once using Redis cache
-with database fallback.
+Webhook Idempotency Manager
+===========================
+Ensures webhook events are processed exactly once using Redis cache with database fallback.
 """
-
 import hashlib
 import json
 import logging
@@ -12,23 +10,11 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import redis.asyncio as redis
-from sqlalchemy import select, insert
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from pydantic import BaseModel
 
 
 logger = logging.getLogger(__name__)
-
-
-class IdempotencyRecord(BaseModel):
-    """Database model for idempotency records"""
-
-    platform_id: str
-    event_id: str
-    payload_hash: str
-    processed_at: datetime
-    created_at: datetime
 
 
 class IdempotencyManager:
@@ -111,12 +97,11 @@ class IdempotencyManager:
         self, platform_id: str, event_id: str, payload_hash: str
     ) -> bool:
         """Check for duplicate in database"""
-        from src.domains.webhooks.models import WebhookEventLog
+        from src.domains.webhooks.models import ProcessedEvent
 
-        stmt = select(WebhookEventLog).where(
-            WebhookEventLog.platform_id == platform_id,
-            WebhookEventLog.event_id == event_id,
-            WebhookEventLog.payload_hash == payload_hash,
+        stmt = select(ProcessedEvent).where(
+            ProcessedEvent.platform_id == platform_id,
+            ProcessedEvent.event_id == f"{platform_id}:{event_id}:{payload_hash[:16]}",
         )
         result = await self.db_session.execute(stmt)
         record = result.scalar_one_or_none()
@@ -173,15 +158,15 @@ class IdempotencyManager:
         self, platform_id: str, event_id: str, payload_hash: str
     ) -> None:
         """Mark event as processed in database"""
-        from src.domains.webhooks.models import WebhookEventLog
+        from src.domains.webhooks.models import ProcessedEvent
 
         now = datetime.utcnow()
-        record = WebhookEventLog(
+        record = ProcessedEvent(
+            event_id=f"{platform_id}:{event_id}:{payload_hash[:16]}",
+            event_hash=payload_hash,
             platform_id=platform_id,
-            event_id=event_id,
-            payload_hash=payload_hash,
             processed_at=now,
-            created_at=now,
+            processed_by="webhook_processor",
         )
         self.db_session.add(record)
         await self.db_session.commit()
@@ -191,7 +176,7 @@ class IdempotencyManager:
         self, platform_id: str, event_id: str, payload_hash: str
     ) -> str:
         """Build Redis key for idempotency cache"""
-        return f"webhook:idem:{platform_id}:{event_id}:{payload_hash}"
+        return f"webhook:idem:{platform_id}:{event_id}:{payload_hash[:16]}"
 
     async def cleanup_expired(self) -> int:
         """
@@ -203,18 +188,20 @@ class IdempotencyManager:
         if not self.db_session:
             return 0
 
-        from src.domains.webhooks.models import WebhookEventLog
+        from src.domains.webhooks.models import ProcessedEvent
 
         cutoff = datetime.utcnow() - timedelta(seconds=self.REDIS_TTL_SECONDS)
 
         try:
-            await self.db_session.execute(
-                WebhookEventLog.__table__.delete().where(
-                    WebhookEventLog.processed_at < cutoff
+            result = await self.db_session.execute(
+                ProcessedEvent.__table__.delete().where(
+                    ProcessedEvent.processed_at < cutoff
                 )
             )
             await self.db_session.commit()
-            return 0
+            deleted = result.rowcount
+            logger.info(f"Cleaned up {deleted} expired idempotency records")
+            return deleted
         except Exception as e:
             logger.error(f"Failed to cleanup expired records: {e}")
             return 0
@@ -237,16 +224,16 @@ class IdempotencyManager:
             logger.warning("Cannot warm cache: Redis or DB session not available")
             return 0
 
-        from src.domains.webhooks.models import WebhookEventLog
+        from src.domains.webhooks.models import ProcessedEvent
 
         cutoff = datetime.utcnow() - timedelta(seconds=self.REDIS_TTL_SECONDS)
 
         try:
-            stmt = select(WebhookEventLog).where(WebhookEventLog.processed_at >= cutoff)
+            stmt = select(ProcessedEvent).where(ProcessedEvent.processed_at >= cutoff)
             if platforms:
-                stmt = stmt.where(WebhookEventLog.platform_id.in_(platforms))
+                stmt = stmt.where(ProcessedEvent.platform_id.in_(platforms))
 
-            stmt = stmt.order_by(WebhookEventLog.processed_at.desc())
+            stmt = stmt.order_by(ProcessedEvent.processed_at.desc())
             stmt = stmt.limit(1000)
 
             result = await self.db_session.execute(stmt)
@@ -254,40 +241,30 @@ class IdempotencyManager:
 
             cached_count = 0
             for record in records:
-                redis_key = self._build_redis_key(
-                    record.platform_id,
-                    record.event_id,
-                    record.payload_hash,
-                )
-                try:
-                    await self.redis.setex(
-                        redis_key,
-                        self.REDIS_TTL_SECONDS,
-                        record.processed_at.isoformat(),
+                # Parse event_id to get components
+                parts = record.event_id.split(":")
+                if len(parts) >= 3:
+                    platform_id = parts[0]
+                    event_id = parts[1]
+
+                    redis_key = self._build_redis_key(
+                        platform_id,
+                        event_id,
+                        record.event_hash,
                     )
-                    cached_count += 1
-                except Exception as e:
-                    logger.warning(f"Failed to cache {redis_key}: {e}")
+                    try:
+                        await self.redis.setex(
+                            redis_key,
+                            self.REDIS_TTL_SECONDS,
+                            record.processed_at.isoformat(),
+                        )
+                        cached_count += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to cache {redis_key}: {e}")
 
             logger.info(f"Warmed cache with {cached_count} events")
             return cached_count
 
         except Exception as e:
             logger.error(f"Failed to warm cache: {e}")
-            return 0
-
-        from src.domains.webhooks.models import WebhookEventLog
-
-        cutoff = datetime.utcnow() - timedelta(seconds=self.REDIS_TTL_SECONDS)
-
-        try:
-            await self.db_session.execute(
-                WebhookEventLog.__table__.delete().where(
-                    WebhookEventLog.processed_at < cutoff
-                )
-            )
-            await self.db_session.commit()
-            return 0
-        except Exception as e:
-            logger.error(f"Failed to cleanup expired records: {e}")
             return 0

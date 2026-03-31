@@ -142,3 +142,74 @@ class WebhookDeadLetter(Base, UUIDMixin, TimestampMixin):
     __table_args__ = (
         Index('idx_webhook_dead_letter_status', 'status'),
     )
+
+
+class OutgoingWebhookStatus(str, Enum):
+    """Outgoing webhook status"""
+    PENDING = "pending"
+    SENT = "sent"
+    RETRYING = "retrying"
+    FAILED = "failed"
+    DLQ = "dlq"
+
+
+class OutgoingWebhookLog(Base, UUIDMixin, TimestampMixin):
+    """
+    Outgoing webhook log
+
+    Tracks webhooks sent to external seller/supplier systems
+    """
+    __tablename__ = "outgoing_webhook_logs"
+
+    integration_id = Column(UUID(as_uuid=True), ForeignKey("shop_integrations.id"), nullable=False)
+    event_type = Column(String(100), nullable=False)  # order.created, order.shipped, inventory.updated
+
+    payload = Column(JSONB, nullable=False)
+    url = Column(String(2048), nullable=False)
+
+    status = Column(String(20), default=OutgoingWebhookStatus.PENDING.value)
+
+    retry_count = Column(Integer, default=0)
+    max_retries = Column(Integer, default=5)
+
+    last_attempt_at = Column(DateTime)
+    next_retry_at = Column(DateTime)
+
+    last_error = Column(Text)
+    response_status_code = Column(Integer)
+    response_body = Column(Text)
+
+    # Relationships
+    integration = relationship("ShopIntegration")
+
+    __table_args__ = (
+        Index('idx_outgoing_webhook_logs_integration', 'integration_id'),
+        Index('idx_outgoing_webhook_logs_status', 'status'),
+        Index('idx_outgoing_webhook_logs_retry', 'next_retry_at'),
+    )
+
+
+class OutgoingWebhookDLQ(Base, UUIDMixin, TimestampMixin):
+    """
+    Dead letter queue for failed outgoing webhooks
+
+    Requires manual intervention or automatic cleanup
+    """
+    __tablename__ = "outgoing_webhook_dlq"
+
+    outgoing_webhook_log_id = Column(UUID(as_uuid=True), ForeignKey("outgoing_webhook_logs.id"), nullable=False)
+
+    failure_reason = Column(Text, nullable=False)
+    failure_count = Column(Integer, default=0)
+
+    status = Column(String(20), default="pending")  # pending, investigation, resolved
+    resolved_at = Column(DateTime)
+    resolved_by = Column(UUID(as_uuid=True))
+    resolution_notes = Column(Text)
+
+    # Relationships
+    outgoing_webhook_log = relationship("OutgoingWebhookLog")
+
+    __table_args__ = (
+        Index('idx_outgoing_webhook_dlq_status', 'status'),
+    )

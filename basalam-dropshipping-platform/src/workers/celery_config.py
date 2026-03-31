@@ -34,5 +34,13 @@ celery_app.conf.update(
             "task": "src.workers.tasks.order_tasks.order_sync",
             "schedule": 120.0,
         },
+        "process-pending-outgoing-webhook-retries": {
+            "task": "src.workers.tasks.outgoing_webhook_retry.process_pending_retries",
+            "schedule": 60.0,
+        },
+        "cleanup-old-webhook-logs": {
+            "task": "src.workers.tasks.outgoing_webhook_retry.cleanup_old_webhook_logs",
+            "schedule": 86400.0,
+        },
     },
 )
