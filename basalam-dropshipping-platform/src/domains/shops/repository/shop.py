@@ -10,7 +10,8 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.repository.base import BaseRepository
-from ..models import Shop, Account
+from ..models import Shop
+from src.domains.accounts.models import Account
 
 
 class ShopRepository(BaseRepository[Shop]):
