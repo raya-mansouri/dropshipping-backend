@@ -38,6 +38,15 @@ class ShopRepository(BaseRepository[Shop]):
         )
         return list(result.scalars().all())
 
+    async def get_by_account_and_name(
+        self, account_id: uuid.UUID, name: str
+    ) -> Shop | None:
+        """Get a shop by account_id and name (for uniqueness check)."""
+        result = await self.session.execute(
+            select(Shop).where(Shop.account_id == account_id, Shop.name == name)
+        )
+        return result.scalar_one_or_none()
+
     async def get_by_role_global(self, role: str) -> List[Shop]:
         """Get all shops with a given role across all accounts."""
         result = await self.session.execute(

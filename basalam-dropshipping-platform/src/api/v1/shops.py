@@ -44,7 +44,10 @@ async def create_shop(
             role=shop_data.shop_role.value,
         )
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        error_msg = str(e)
+        if "already exists" in error_msg:
+            raise HTTPException(status_code=409, detail=error_msg)
+        raise HTTPException(status_code=422, detail=error_msg)
     return shop
 
 

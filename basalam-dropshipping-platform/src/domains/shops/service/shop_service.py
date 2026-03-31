@@ -60,10 +60,17 @@ class ShopService:
 
         Raises:
             ValueError: If role is not 'supplier' or 'seller'
+            ValueError: If a shop with the same account_id and name already exists
         """
         if not self.validate_role(role):
             raise ValueError(
                 f"Invalid role '{role}'. Must be one of: {', '.join(VALID_ROLES)}"
+            )
+
+        existing = await self._repository.get_by_account_and_name(account_id, name)
+        if existing:
+            raise ValueError(
+                f"Shop with name '{name}' already exists for this account"
             )
 
         shop_data = {
