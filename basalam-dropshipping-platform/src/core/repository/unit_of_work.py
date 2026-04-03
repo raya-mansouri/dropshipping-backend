@@ -92,20 +92,20 @@ class UnitOfWork:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Exit the async context manager with proper error handling."""
+        """Exit the async context manager with proper error handling.
+
+        Manages transaction boundary only (commit/rollback).
+        Session lifecycle is owned by the caller (e.g. get_db dependency).
+        """
         if exc_type is not None:
-            # An exception occurred - rollback
             await self.rollback()
             logger.error(
                 "UnitOfWork rollback due to exception",
                 exc_info=(exc_type, exc_val, exc_tb)
             )
-            # Re-raise the exception after rollback
             return False
         else:
-            # No exception - commit
             await self.commit()
-        await self.session.close()
         return True
 
     async def commit(self):
@@ -142,11 +142,13 @@ class UnitOfWork:
 async def create_unit_of_work(session: AsyncSession):
     """
     Factory function to create and manage UnitOfWork.
-    
+
     Usage:
         async with create_unit_of_work(session) as uow:
             await uow.accounts.create(...)
             # Automatic commit on success, rollback on failure
+
+    Note: Session lifecycle is NOT managed here — the caller owns it.
     """
     uow = UnitOfWork(session)
     try:
@@ -155,5 +157,3 @@ async def create_unit_of_work(session: AsyncSession):
     except Exception:
         await uow.rollback()
         raise
-    finally:
-        await session.close()

@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .base import WebhookProcessor
+from src.core.repository.unit_of_work import UnitOfWork
 
 
 logger = logging.getLogger(__name__)
@@ -75,14 +76,15 @@ class InventoryWebhookProcessor(WebhookProcessor):
         """
         from src.domains.suppliers.models import SupplierVariant
 
-        stmt = select(SupplierVariant).where(
-            SupplierVariant.external_variant_id == variant_id
-        )
-        result = await self.db_session.execute(stmt)
-        variant = result.scalar_one_or_none()
+        async with UnitOfWork(self.db_session):
+            stmt = select(SupplierVariant).where(
+                SupplierVariant.external_variant_id == variant_id
+            )
+            result = await self.db_session.execute(stmt)
+            variant = result.scalar_one_or_none()
 
-        if variant:
-            variant.inventory_quantity = inventory
-            await self.db_session.commit()
-        else:
-            logger.warning(f"Variant not found: {variant_id}")
+            if variant:
+                variant.inventory_quantity = inventory
+                logger.info(f"Updated inventory for variant {variant_id}: {inventory}")
+            else:
+                logger.warning(f"Variant not found: {variant_id}")

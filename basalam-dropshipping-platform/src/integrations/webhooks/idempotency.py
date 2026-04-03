@@ -158,6 +158,7 @@ class IdempotencyManager:
         self, platform_id: str, event_id: str, payload_hash: str
     ) -> None:
         """Mark event as processed in database"""
+        from src.core.repository.unit_of_work import UnitOfWork
         from src.domains.webhooks.models import ProcessedEvent
 
         now = datetime.utcnow()
@@ -168,8 +169,8 @@ class IdempotencyManager:
             processed_at=now,
             processed_by="webhook_processor",
         )
-        self.db_session.add(record)
-        await self.db_session.commit()
+        async with UnitOfWork(self.db_session):
+            self.db_session.add(record)
         logger.debug(f"Marked event as processed in DB: {event_id}")
 
     def _build_redis_key(

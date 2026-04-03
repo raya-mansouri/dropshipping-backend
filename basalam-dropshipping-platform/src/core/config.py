@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     basalam_client_secret: SecretStr = SecretStr("")
     base_url: str = "http://localhost:8000"
     docs_offline: bool = False
+    basalam_auth_url: str = "https://auth.basalam.com"
+    basalam_api_url: str = "https://openapi.basalam.com/v1"
+    basalam_webhook_url: str = "https://webhook.basalam.com/v1"
 
     # ------------------------------------------------------------------
     # MinIO / Storage

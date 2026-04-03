@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .base import WebhookProcessor
+from src.core.repository.unit_of_work import UnitOfWork
 
 
 logger = logging.getLogger(__name__)
@@ -79,19 +80,19 @@ class OrderWebhookProcessor(WebhookProcessor):
         """Update order status in the database"""
         from src.domains.orders.models import Order
 
-        stmt = select(Order).where(Order.external_order_id == order_id)
-        result = await self.db_session.execute(stmt)
-        order = result.scalar_one_or_none()
+        async with UnitOfWork(self.db_session):
+            stmt = select(Order).where(Order.external_order_id == order_id)
+            result = await self.db_session.execute(stmt)
+            order = result.scalar_one_or_none()
 
-        if order:
-            new_status = data.get("status", "").lower()
-            mapped_status = self.STATUS_MAP.get(new_status, "pending")
-            order.status = mapped_status
+            if order:
+                new_status = data.get("status", "").lower()
+                mapped_status = self.STATUS_MAP.get(new_status, "pending")
+                order.status = mapped_status
 
-            if "total_price" in data:
-                order.total_amount = data["total_price"]
+                if "total_price" in data:
+                    order.total_amount = data["total_price"]
 
-            await self.db_session.commit()
-            logger.info(f"Updated order {order_id} status to {mapped_status}")
-        else:
-            logger.warning(f"Order not found: {order_id}")
+                logger.info(f"Updated order {order_id} status to {mapped_status}")
+            else:
+                logger.warning(f"Order not found: {order_id}")

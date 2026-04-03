@@ -64,3 +64,18 @@ class SyncJobRepository(BaseRepository[SyncJob]):
             await self.session.flush()
 
         return await self.get_by_id(id)
+
+    async def get_latest_by_integration(
+        self, integration_id: uuid.UUID, entity_type: str
+    ) -> Optional[SyncJob]:
+        """Get the latest sync job for a specific integration and entity type."""
+        result = await self.session.execute(
+            select(SyncJob)
+            .where(
+                SyncJob.integration_id == integration_id,
+                SyncJob.entity_type == entity_type,
+            )
+            .order_by(SyncJob.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()

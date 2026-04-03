@@ -1,12 +1,7 @@
 """
 Product Sync Service for Basalam Integration
 ============================================
-Handles cursor-based pagination, delta sync, and bulk upserts.
-
-Tasks:
-- 4.8.1: Cursor-based pagination
-- 4.8.2: Delta sync using last_modified timestamps
-- 4.8.3: Bulk insert with conflict resolution
+Handles page-based pagination, delta sync, and bulk upserts.
 """
 
 import asyncio
@@ -15,12 +10,13 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
 from uuid import UUID
 
-from sqlalchemy import select, insert, update, and_
+from sqlalchemy import select, and_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domains.products.models import SupplierProduct, ProductVariant, SupplierVariant
 from src.domains.shops.models import ShopIntegration, SyncState
+from src.domains.shops.repository.sync_state import SyncStateRepository
 from src.integrations.basalam.client import BasalamClient
 from src.integrations.basalam.exceptions import BasalamAPIError
 
@@ -59,8 +55,8 @@ class ProductSyncService:
     Service for syncing products from Basalam.
 
     Features:
-    - Cursor-based pagination for API requests
-    - Delta sync using last_modified timestamps
+    - Page-based pagination for API requests
+    - Delta sync using updated_at_min timestamps
     - Full sync mode when needed
     - Bulk upserts with ON CONFLICT DO UPDATE
     - Batch processing with configurable batch size
@@ -78,17 +74,10 @@ class ProductSyncService:
         client: BasalamClient,
         integration_id: UUID,
     ):
-        """
-        Initialize the ProductSyncService.
-
-        Args:
-            session: Database session
-            client: Basalam API client
-            integration_id: ShopIntegration ID to sync products for
-        """
         self.session = session
         self.client = client
         self.integration_id = integration_id
+        self._sync_state_repo = SyncStateRepository(session)
         self._sync_state: Optional[SyncState] = None
         self._shop_id: Optional[UUID] = None
         self._integration: Optional[ShopIntegration] = None
@@ -107,26 +96,10 @@ class ProductSyncService:
     async def _get_or_create_sync_state(
         self, entity_type: str = "product"
     ) -> SyncState:
-        """Get or create sync state for this integration."""
-        result = await self.session.execute(
-            select(SyncState).where(
-                and_(
-                    SyncState.integration_id == self.integration_id,
-                    SyncState.entity_type == entity_type,
-                )
-            )
+        """Get or create sync state for this integration using SyncStateRepository."""
+        sync_state = await self._sync_state_repo.get_or_create(
+            self.integration_id, entity_type
         )
-        sync_state = result.scalar_one_or_none()
-
-        if sync_state is None:
-            sync_state = SyncState(
-                integration_id=self.integration_id,
-                entity_type=entity_type,
-                status="idle",
-            )
-            self.session.add(sync_state)
-            await self.session.flush()
-
         return sync_state
 
     async def _update_sync_state(
@@ -229,31 +202,54 @@ class ProductSyncService:
         batch_size: int,
         per_page: int,
     ) -> ProductSyncResult:
-        """Fetch products from API and process them in batches."""
+        """Fetch products from API and process them in batches using page-based pagination."""
 
-        cursor_token = None if full_sync else sync_state.cursor_token
         last_modified = None if full_sync else sync_state.last_sync_timestamp
 
         result = ProductSyncResult()
-        has_more = True
 
-        while has_more:
+        # Fetch first page to determine total pages
+        try:
+            response = await self._fetch_products_page(
+                page=1,
+                per_page=per_page,
+                last_modified=last_modified,
+            )
+        except BasalamAPIError as e:
+            logger.error(f"Failed to fetch products page: {e}")
+            result.errors.append(f"API Error: {str(e)}")
+            return result
+
+        pagination = response.get("pagination", {})
+        total_pages = pagination.get("total_page", 1)
+        products = response.get("products", [])
+
+        # Process first page
+        if products:
+            result.total_fetched += len(products)
+            batches = self._create_batches(products, batch_size)
+            result.batches_processed += len(batches)
+            batch_results = await self._process_batches_concurrent(batches)
+            for batch_created, batch_updated, batch_failed in batch_results:
+                result.created_count += batch_created
+                result.updated_count += batch_updated
+                result.failed_count += batch_failed
+
+        # Process remaining pages (2..total_pages)
+        for page in range(2, total_pages + 1):
             try:
                 response = await self._fetch_products_page(
-                    cursor=cursor_token,
+                    page=page,
                     per_page=per_page,
                     last_modified=last_modified,
                 )
             except BasalamAPIError as e:
-                logger.error(f"Failed to fetch products page: {e}")
-                result.errors.append(f"API Error: {str(e)}")
+                logger.error(f"Failed to fetch products page {page}: {e}")
+                result.errors.append(f"API Error on page {page}: {str(e)}")
                 break
 
             products = response.get("products", [])
-            pagination = response.get("pagination", {})
-
             if not products:
-                has_more = False
                 continue
 
             result.total_fetched += len(products)
@@ -268,50 +264,46 @@ class ProductSyncService:
                 result.updated_count += batch_updated
                 result.failed_count += batch_failed
 
-            cursor_token = pagination.get("next_cursor") or pagination.get("cursor")
-            has_more = bool(
-                cursor_token and cursor_token != pagination.get("current_cursor")
-            )
-
-            if cursor_token:
-                await self._update_sync_state(
-                    sync_state,
-                    cursor_token=cursor_token,
-                    created=0,
-                    updated=0,
-                    failed=0,
-                )
-
         return result
 
     async def _fetch_products_page(
         self,
-        cursor: Optional[str] = None,
+        page: int = 1,
         per_page: int = DEFAULT_PER_PAGE,
         last_modified: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """
-        Fetch a single page of products with cursor-based pagination.
+        Fetch a single page of products from Basalam API.
+
+        Calls GET /vendors/{vendor_id}/products with page-based pagination.
+        The response contains {data, total_page, page, per_page, total_count}.
 
         Args:
-            cursor: Cursor token for next page
+            page: Page number (1-based)
             per_page: Number of products per page
-            last_modified: Filter products modified since this timestamp
+            last_modified: Filter products modified since this timestamp (delta sync)
 
         Returns:
-            Dict with products and pagination info
+            Dict with products (mapped) and pagination info (total_page, etc.)
         """
-        params: Dict[str, Any] = {"per_page": min(per_page, self.MAX_PER_PAGE)}
+        integration = await self._ensure_integration_loaded()
+        if not integration or not integration.external_shop_id:
+            raise ValueError(
+                f"Integration {self.integration_id} has no external_shop_id (vendor_id)"
+            )
 
-        if cursor:
-            params["cursor"] = cursor
+        vendor_id = integration.external_shop_id
+        params: Dict[str, Any] = {
+            "page": page,
+            "per_page": min(per_page, self.MAX_PER_PAGE),
+        }
 
         if last_modified:
             params["updated_at_min"] = last_modified.isoformat()
 
         response = await self.client._request(
             "GET",
-            "/products",
+            f"/vendors/{vendor_id}/products",
             rate_limit_endpoint="products",
             params=params,
         )
@@ -320,20 +312,57 @@ class ProductSyncService:
             "products": [
                 self._map_basalam_product(p) for p in response.get("data", [])
             ],
-            "pagination": response.get("pagination", {}),
+            "pagination": {
+                "total_page": response.get("total_page", 1),
+                "page": response.get("page", page),
+                "per_page": response.get("per_page", per_page),
+                "total_count": response.get("total_count", 0),
+            },
         }
 
     def _map_basalam_product(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Map Basalam product to internal format."""
+        """Map real Basalam product to internal format.
+
+        Real Basalam product shape:
+        - id (not product_id)
+        - photo{original, id} (not images[])
+        - status{value} (numeric, 2976=active)
+        - inventory (top-level)
+        - is_wholesale
+        """
+        # Handle status: Basalam returns {value: 2976, name: "active"}
+        status_field = payload.get("status", {})
+        if isinstance(status_field, dict):
+            status_value = status_field.get("value")
+            # Map known numeric status codes
+            status = "active" if status_value == 2976 else str(status_value)
+        else:
+            status = str(status_field) if status_field else "active"
+
+        # Handle photo: Basalam returns {original: url, id: int}
+        photo = payload.get("photo", {})
+        media = []
+        if photo:
+            media.append({
+                "url": photo.get("original", ""),
+                "external_id": str(photo.get("id", "")),
+                "type": "image",
+                "order": 0,
+            })
+
         return {
             "external_product_id": str(payload.get("id")),
             "title": payload.get("title"),
             "description": payload.get("description"),
-            "status": payload.get("status", "active"),
+            "status": status,
             "category_id": payload.get("category_id"),
             "has_variants": bool(payload.get("variants")),
             "raw_payload": payload,
             "moderation_status": payload.get("moderation_status"),
+            "media": media,
+            "is_wholesale": payload.get("is_wholesale", False),
+            "inventory": payload.get("inventory", 0),
+            "price": payload.get("price"),
             "updated_at": payload.get("updated_at"),
             "created_at": payload.get("created_at"),
             "variants": [
@@ -345,14 +374,17 @@ class ProductSyncService:
     def _map_basalam_variant(
         self, variant: Dict[str, Any], product_id: str
     ) -> Dict[str, Any]:
-        """Map Basalam variant to internal format."""
+        """Map real Basalam variant to internal format.
+
+        Real Basalam variant has: id, price, inventory, attributes.
+        """
         return {
             "external_variant_id": str(variant.get("id")),
             "external_product_id": product_id,
             "sku": variant.get("sku"),
             "attributes": variant.get("attributes", {}),
             "cost_price": variant.get("price", 0),
-            "inventory": variant.get("stock", 0),
+            "inventory": variant.get("inventory", variant.get("stock", 0)),
             "status": "active" if variant.get("is_active", True) else "inactive",
             "raw_payload": variant,
             "updated_at": variant.get("updated_at"),

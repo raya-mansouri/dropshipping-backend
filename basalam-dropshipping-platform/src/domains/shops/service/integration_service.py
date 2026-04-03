@@ -6,9 +6,12 @@ Business logic for shop platform integrations
 Includes automatic webhook registration on connect and cleanup on disconnect.
 """
 
+import asyncio
+import json
 import logging
 from datetime import datetime
 from typing import List, Optional, Dict, Any
+from urllib.parse import quote
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,9 +27,9 @@ from ..models import Shop, ShopIntegration, Platform
 logger = logging.getLogger(__name__)
 
 
-# Webhook events to subscribe per platform
+# Webhook events to subscribe per platform (Basalam uses numeric event_ids)
 PLATFORM_WEBHOOK_EVENTS = {
-    "basalam": ["order.created", "order.updated", "inventory.updated", "product.updated"],
+    "basalam": [8, 5, 7],  # 8=PRODUCT_CREATE_CHANGES, 5=VENDOR_NEW_ORDER, 7=VENDOR_PARCEL_CHANGES
     "shopify": ["orders/create", "orders/updated", "inventory_levels/update", "products/update"],
     "woocommerce": ["order.created", "order.updated", "product.updated"],
 }
@@ -173,7 +176,11 @@ class IntegrationService:
         platform: Platform,
     ) -> Dict[str, Any]:
         """
-        Register webhooks with external platform.
+        Register webhooks with external platform using 2-step flow for Basalam.
+
+        For Basalam specifically:
+        1. Create webhook with numeric event_ids via BasalamClient
+        2. Subscribe vendor using their own access token
 
         Args:
             integration: The ShopIntegration instance
@@ -187,8 +194,6 @@ class IntegrationService:
         """
         from src.core.config import get_settings
         from src.domains.shops.service.webhook_secret_service import get_webhook_secret_service
-        from src.integrations.shop.connector import get_connector
-        from src.integrations.shop.connector import ShopConnector
 
         settings = get_settings()
         secret_service = get_webhook_secret_service()
@@ -197,23 +202,33 @@ class IntegrationService:
         secret = secret_service.generate_secret()
         encrypted_secret = secret_service.encrypt_for_storage(secret)
 
-        # Build webhook URL
+        # Build webhook URL using configured base URL
         base_url = settings.webhook_base_url or settings.base_url
         webhook_url = f"{base_url}/api/v1/webhooks/{platform.code}/{integration.id}"
 
-        # Get events to subscribe
-        events = PLATFORM_WEBHOOK_EVENTS.get(platform.code, ["*"])
+        # Get events to subscribe — numeric IDs for Basalam
+        events = PLATFORM_WEBHOOK_EVENTS.get(platform.code, [])
 
-        # Get platform connector
-        connector: ShopConnector = get_connector(platform.code, {
-            "credentials": integration.credentials_encrypted,
-        })
+        if platform.code == "basalam":
+            return await self._register_basalam_webhook(
+                integration=integration,
+                webhook_url=webhook_url,
+                events=events,
+                encrypted_secret=encrypted_secret,
+            )
+
+        # Non-Basalam platforms (Shopify, WooCommerce) — delegate to connector
+        from src.integrations.shop.connector import get_connector, ShopConnector
+
+        connector: ShopConnector = get_connector(
+            platform.code,
+            {"credentials": integration.credentials_encrypted},
+            vendor_id=integration.external_shop_id,
+        )
 
         try:
-            # Call platform's register_webhook
             webhook_id = await connector.register_webhook(webhook_url, events)
 
-            # Store encrypted secret
             await self._integration_repository.update(
                 integration.id,
                 {"webhook_secret_encrypted": encrypted_secret},
@@ -236,6 +251,85 @@ class IntegrationService:
                 extra={"integration_id": str(integration.id)},
             )
             raise
+
+    async def _register_basalam_webhook(
+        self,
+        integration: ShopIntegration,
+        webhook_url: str,
+        events: list,
+        encrypted_secret: str,
+    ) -> Dict[str, Any]:
+        """2-step Basalam webhook registration: create webhook then subscribe vendor."""
+        from src.core.config import get_settings
+        from src.domains.shops.service.webhook_secret_service import get_webhook_secret_service
+        from src.integrations.basalam.client import BasalamClient
+
+        settings = get_settings()
+
+        # Decrypt credentials to get vendor access token
+        secret_service = get_webhook_secret_service()
+        credentials_blob = integration.credentials_encrypted
+        if isinstance(credentials_blob, dict):
+            encrypted = credentials_blob.get("encrypted", "")
+        else:
+            encrypted = str(credentials_blob)
+
+        decrypted = secret_service.decrypt_from_storage(encrypted)
+        creds = json.loads(decrypted)
+        access_token = creds.get("access_token", "")
+        refresh_token = creds.get("refresh_token", "")
+
+        client = BasalamClient(
+            client_id=settings.basalam_client_id,
+            client_secret=settings.basalam_client_secret.get_secret_value(),
+            access_token=access_token,
+            refresh_token=refresh_token,
+        )
+
+        try:
+            # Step 1: Create webhook with numeric event_ids
+            result = await client.register_webhook(
+                url=webhook_url,
+                events=events,  # numeric IDs like [8, 5, 7]
+            )
+            webhook_id = str(result.get("id", result.get("webhook_id", "")))
+
+            # Step 2: Subscribe vendor to the webhook with their own token
+            await client.subscribe_user_to_webhook(
+                webhook_id=webhook_id,
+                access_token=access_token,
+            )
+
+            # Store encrypted webhook secret and webhook_id
+            await self._integration_repository.update(
+                integration.id,
+                {
+                    "webhook_secret_encrypted": encrypted_secret,
+                    "webhook_id": webhook_id,
+                },
+            )
+
+            logger.info(
+                f"Registered Basalam webhook {webhook_id} for integration "
+                f"{integration.id} with event_ids: {events}, subscribed vendor"
+            )
+
+            return {
+                "webhook_id": webhook_id,
+                "webhook_url": webhook_url,
+                "events": events,
+            }
+
+        except Exception as e:
+            logger.error(
+                f"Failed to register Basalam webhook for integration "
+                f"{integration.id}: {e}",
+                exc_info=True,
+            )
+            raise
+
+        finally:
+            await client.close()
 
     async def disconnect_shop(
         self,
@@ -318,9 +412,11 @@ class IntegrationService:
             raise ValueError(f"Platform not found for integration {integration.id}")
 
         # Get platform connector
-        connector = get_connector(platform.code, {
-            "credentials": integration.credentials_encrypted,
-        })
+        connector = get_connector(
+            platform.code,
+            {"credentials": integration.credentials_encrypted},
+            vendor_id=integration.external_shop_id,
+        )
 
         # Unregister webhook
         await connector.unregister_webhook(integration.webhook_id)
@@ -362,7 +458,10 @@ class IntegrationService:
         self, shop_id: uuid.UUID, platform_id: uuid.UUID
     ) -> Optional[ShopIntegration]:
         """
-        Refresh OAuth token for an integration.
+        Refresh OAuth token for an integration with Redis distributed lock.
+
+        Uses a Redis lock (``oauth:refresh:{integration_id}``, 30s TTL) to prevent
+        concurrent refresh race conditions.
 
         Args:
             shop_id: UUID of the shop
@@ -374,6 +473,10 @@ class IntegrationService:
         Raises:
             ValueError: If integration not found or not OAuth type
         """
+        from src.core.redis_client import get_redis_client
+        from src.core.config import get_settings
+        from src.integrations.basalam.client import BasalamClient
+
         integration = await self.get_integration(shop_id, platform_id)
 
         if not integration:
@@ -384,9 +487,90 @@ class IntegrationService:
         if integration.connection_type != "oauth":
             raise ValueError("Only OAuth integrations support token refresh")
 
-        return await self._integration_repository.update_status(
-            integration.id, "connected"
+        # Redis distributed lock to prevent concurrent refresh race
+        lock_key = f"oauth:refresh:{integration.id}"
+        redis_client = get_redis_client()
+        lock_acquired = await redis_client.set(
+            lock_key, "1", nx=True, ex=30
         )
+
+        if not lock_acquired:
+            logger.info(
+                f"Token refresh already in progress for integration {integration.id}"
+            )
+            # Wait briefly and return current state
+            await asyncio.sleep(2)
+            return await self._integration_repository.get_by_id(integration.id)
+
+        try:
+            # Decrypt current credentials to get refresh_token
+            credentials = integration.credentials_encrypted or {}
+            if isinstance(credentials, dict) and "encrypted" in credentials:
+                from src.domains.shops.service.webhook_secret_service import get_webhook_secret_service
+                secret_service = get_webhook_secret_service()
+                decrypted = secret_service.decrypt_from_storage(credentials["encrypted"])
+                creds = json.loads(decrypted)
+            else:
+                creds = credentials
+
+            refresh_token_val = creds.get("refresh_token", "")
+            if not refresh_token_val:
+                raise ValueError("No refresh token available for integration")
+
+            # Create client and refresh
+            settings = get_settings()
+            client = BasalamClient(
+                client_id=settings.basalam_client_id,
+                client_secret=settings.basalam_client_secret.get_secret_value(),
+            )
+
+            try:
+                token_data = await client.refresh_access_token_with_code(
+                    refresh_token_val
+                )
+            except Exception as e:
+                logger.error(
+                    f"Token refresh failed for integration {integration.id}: {e}"
+                )
+                # If refresh fails with auth error, mark as disconnected
+                await self._integration_repository.update(
+                    integration.id,
+                    {"status": "disconnected", "last_error": f"Token refresh failed: {e}"},
+                )
+                raise
+
+            # Re-encrypt and store new credentials
+            new_creds = {
+                "access_token": token_data.get("access_token", ""),
+                "refresh_token": token_data.get(
+                    "refresh_token", refresh_token_val
+                ),
+                "vendor_id": creds.get("vendor_id", ""),
+            }
+            from src.domains.shops.service.webhook_secret_service import (
+                get_webhook_secret_service,
+            )
+            secret_service = get_webhook_secret_service()
+            encrypted = secret_service.encrypt_for_storage(
+                json.dumps(new_creds)
+            )
+
+            integration = await self._integration_repository.update(
+                integration.id,
+                {
+                    "credentials_encrypted": {"encrypted": encrypted},
+                    "status": "connected",
+                    "last_error": None,
+                },
+            )
+
+            logger.info(f"Successfully refreshed token for integration {integration.id}")
+            return integration
+
+        finally:
+            # Always release the lock
+            await redis_client.delete(lock_key)
+            await client.close()
 
     async def test_connection(
         self, shop_id: uuid.UUID, platform_id: uuid.UUID
@@ -418,40 +602,204 @@ class IntegrationService:
             "last_synced_at": integration.last_synced_at,
         }
 
-    async def handle_oauth_callback(
-        self, shop_id: uuid.UUID, platform_code: str, code: str
-    ) -> ShopIntegration:
+    async def start_oauth(
+        self, shop_id: uuid.UUID, platform_code: str
+    ) -> Dict[str, Any]:
         """
-        Handle OAuth callback and create integration.
+        Start OAuth 2.0 flow for a shop platform integration.
+
+        Generates a real authorization URL, stores CSRF state in Redis,
+        creates a pending integration record.
 
         Args:
             shop_id: UUID of the shop
-            platform_code: Platform code (e.g., 'basalam', 'shopify')
-            code: OAuth authorization code
+            platform_code: Platform code (e.g., 'basalam')
 
         Returns:
-            Newly created ShopIntegration instance
+            Dict with authorize_url, state, integration_id
 
         Raises:
             ValueError: If shop or platform not found
         """
+        from src.core.config import get_settings
+        from src.core.redis_client import get_redis_client
+
         shop = await self._get_shop_or_fail(shop_id)
         platform = await self._get_platform_or_fail(platform_code)
+        settings = get_settings()
 
-        credentials = {
-            "connection_type": "oauth",
-            "credentials": {"auth_code": code},
-        }
+        # Generate random state for CSRF protection
+        state = uuid.uuid4().hex
 
+        # Build authorization URL
+        client_id = settings.basalam_client_id
+        redirect_uri = f"{settings.base_url}/api/v1/shops/{shop_id}/oauth/callback"
+        scope = "+".join([
+            "vendor.product.read",
+            "vendor.parcel.read",
+            "vendor.shipping.read"
+        ])
+
+        authorize_url = (
+            f"https://basalam.com/accounts/sso?"
+            f"client_id={client_id}"
+            f"&scope={quote(scope)}"
+            f"&redirect_uri={quote(redirect_uri, safe='')}"
+            f"&state={state}"
+            f"&response_type=code"
+        )
+
+        # Store state in Redis with 10-min TTL (includes platform_code for callback)
+        redis_client = get_redis_client()
+        await redis_client.setex(
+            f"oauth:state:{state}",
+            600,
+            json.dumps({
+                "shop_id": str(shop_id),
+                "platform_code": platform_code,
+            }),
+        )
+
+        # Create pending integration
         integration_data = {
             "shop_id": shop.id,
             "platform_id": platform.id,
             "connection_type": "oauth",
-            "credentials_encrypted": credentials["credentials"],
-            "status": "connected",
+            "status": "pending",
+            "webhook_status": "not_registered",
+        }
+        integration = await self._integration_repository.create(integration_data)
+
+        logger.info(
+            f"Started OAuth flow for shop {shop_id}, platform {platform_code}, "
+            f"integration {integration.id}"
+        )
+
+        return {
+            "authorize_url": authorize_url,
+            "state": state,
+            "integration_id": integration.id,
         }
 
-        return await self._integration_repository.create(integration_data)
+    async def handle_oauth_callback(
+        self, shop_id: uuid.UUID, code: str, state: str
+    ) -> ShopIntegration:
+        """
+        Handle OAuth callback — exchange code for tokens, fetch vendor identity.
+
+        Verifies state from Redis, exchanges authorization code for tokens,
+        fetches vendor info from Basalam, encrypts and stores credentials.
+
+        Args:
+            shop_id: UUID of the shop
+            code: OAuth authorization code from the provider
+            state: CSRF state parameter from the authorization URL
+
+        Returns:
+            Updated ShopIntegration instance
+
+        Raises:
+            ValueError: If state is invalid, code exchange fails, or no vendor found
+        """
+        from src.core.config import get_settings
+        from src.core.redis_client import get_redis_client
+        from src.integrations.basalam.client import BasalamClient
+        from src.domains.shops.service.webhook_secret_service import (
+            get_webhook_secret_service,
+        )
+
+        settings = get_settings()
+        redis_client = get_redis_client()
+
+        # Verify state from Redis
+        stored_data = await redis_client.get(f"oauth:state:{state}")
+        if not stored_data:
+            raise ValueError("Invalid or expired OAuth state")
+
+        # Clean up state
+        await redis_client.delete(f"oauth:state:{state}")
+
+        state_payload = json.loads(stored_data)
+        if state_payload.get("shop_id") != str(shop_id):
+            raise ValueError("OAuth state does not match shop")
+
+        platform_code = state_payload.get("platform_code")
+        platform = await self._get_platform_or_fail(platform_code)
+
+        # Find the pending integration for this shop/platform
+        integrations = await self._integration_repository.get_by_shop(shop_id)
+        integration = next(
+            (
+                i
+                for i in integrations
+                if i.platform_id == platform.id
+                and i.status == "pending"
+                and i.connection_type == "oauth"
+            ),
+            None,
+        )
+        if not integration:
+            raise ValueError(
+                "No pending OAuth integration found for this shop and platform"
+            )
+
+        # Exchange authorization code for tokens
+        redirect_uri = f"{settings.base_url}/api/v1/shops/{shop_id}/oauth/callback"
+        client = BasalamClient(
+            client_id=settings.basalam_client_id,
+            client_secret=settings.basalam_client_secret.get_secret_value(),
+        )
+
+        try:
+            token_data = await client.exchange_authorization_code(code, redirect_uri)
+        except Exception as e:
+            logger.error(f"Token exchange failed for integration {integration.id}: {e}")
+            raise ValueError(
+                f"Failed to exchange authorization code with Basalam: {e}"
+            )
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+
+        # Fetch current user to get vendor_id
+        try:
+            user_data = await client.get_current_user(access_token)
+        except Exception as e:
+            logger.error(f"Failed to fetch user info for integration {integration.id}: {e}")
+            raise ValueError(f"Failed to fetch user info from Basalam: {e}")
+
+        vendor_info = user_data.get("vendor")
+        if not vendor_info or not vendor_info.get("id"):
+            raise ValueError("No Basalam vendor account found for this user")
+
+        vendor_id = str(vendor_info["id"])
+
+        # Encrypt credentials with Fernet
+        secret_service = get_webhook_secret_service()
+        credentials_blob = json.dumps({
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "vendor_id": vendor_id,
+        })
+        encrypted_credentials = secret_service.encrypt_for_storage(credentials_blob)
+
+        # Update integration with encrypted tokens and vendor info
+        integration = await self._integration_repository.update(
+            integration.id,
+            {
+                "credentials_encrypted": {"encrypted": encrypted_credentials},
+                "external_shop_id": vendor_id,
+                "status": "connected",
+            },
+        )
+
+        logger.info(
+            f"Successfully connected Basalam vendor {vendor_id} "
+            f"for integration {integration.id}"
+        )
+
+        await client.close()
+        return integration
 
     async def rotate_webhook_secret(
         self,
@@ -500,9 +848,11 @@ class IntegrationService:
         if not platform:
             raise ValueError(f"Platform not found for integration {integration.id}")
 
-        connector = get_connector(platform.code, {
-            "credentials": integration.credentials_encrypted,
-        })
+        connector = get_connector(
+            platform.code,
+            {"credentials": integration.credentials_encrypted},
+            vendor_id=integration.external_shop_id,
+        )
 
         try:
             # Update platform with new secret

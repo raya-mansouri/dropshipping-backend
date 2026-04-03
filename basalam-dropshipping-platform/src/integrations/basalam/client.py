@@ -2,6 +2,8 @@ from typing import Optional, Dict, Any, List
 
 import httpx
 
+from src.core.config import get_settings
+
 from .exceptions import (
     BasalamAPIError,
     AuthenticationError,
@@ -22,7 +24,7 @@ from .mappers import (
 
 
 class BasalamClient:
-    BASE_URL = "https://api.basalam.com/api/v1"
+    BASE_URL = get_settings().basalam_api_url
 
     DEFAULT_POOL_LIMITS = httpx.Limits(
         max_keepalive_connections=20,
@@ -127,15 +129,16 @@ class BasalamClient:
         return response.json()
 
     async def get_access_token(self) -> Dict[str, str]:
-        client = await self._get_client()
-        response = await client.post(
-            "/oauth/token",
-            data={
-                "grant_type": "client_credentials",
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-            },
-        )
+        settings = get_settings()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{settings.basalam_auth_url}/oauth/token",
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                },
+            )
 
         if response.status_code >= 400:
             self._handle_response_error(response)
@@ -153,16 +156,17 @@ class BasalamClient:
         if not self.refresh_token:
             raise AuthenticationError("No refresh token available")
 
-        client = await self._get_client()
-        response = await client.post(
-            "/oauth/token",
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": self.refresh_token,
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-            },
-        )
+        settings = get_settings()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{settings.basalam_auth_url}/oauth/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": self.refresh_token,
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                },
+            )
 
         if response.status_code >= 400:
             self._handle_response_error(response)
@@ -176,11 +180,104 @@ class BasalamClient:
 
         return data
 
-    async def list_products(self, page: int = 1, per_page: int = 20) -> Dict[str, Any]:
+    # ------------------------------------------------------------------
+    # OAuth 2.0 — Authorization Code Flow
+    # ------------------------------------------------------------------
+
+    async def exchange_authorization_code(
+        self, code: str, redirect_uri: str
+    ) -> Dict[str, Any]:
+        """Exchange an OAuth authorization code for access/refresh tokens.
+
+        POSTs to the Basalam auth server with grant_type=authorization_code.
+        """
+        settings = get_settings()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{settings.basalam_auth_url}/oauth/token",
+                data={
+                    "grant_type": "authorization_code",
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                    "redirect_uri": redirect_uri,
+                    "code": code,
+                },
+            )
+
+        if response.status_code >= 400:
+            self._handle_response_error(response)
+
+        data = response.json()
+        self.access_token = data.get("access_token")
+        self.refresh_token = data.get("refresh_token")
+
+        if self._http_client:
+            self._http_client.headers["Authorization"] = f"Bearer {self.access_token}"
+
+        return data
+
+    async def refresh_access_token_with_code(
+        self, refresh_token: str
+    ) -> Dict[str, Any]:
+        """Refresh an access token using a refresh token.
+
+        POSTs to the Basalam auth server with grant_type=refresh_token.
+        """
+        settings = get_settings()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{settings.basalam_auth_url}/oauth/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                },
+            )
+
+        if response.status_code >= 400:
+            self._handle_response_error(response)
+
+        data = response.json()
+        self.access_token = data.get("access_token")
+        self.refresh_token = data.get("refresh_token")
+
+        if self._http_client:
+            self._http_client.headers["Authorization"] = f"Bearer {self.access_token}"
+
+        return data
+
+    async def get_current_user(self, access_token: Optional[str] = None) -> Dict[str, Any]:
+        """Fetch current authenticated user info including vendor details.
+
+        GETs /users/me and returns {id, vendor: {id, title}}.
+        """
+        token = access_token or self.access_token
+        if not token:
+            raise AuthenticationError("No access token available")
+
+        settings = get_settings()
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{settings.basalam_api_url}/users/me",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        if response.status_code >= 400:
+            self._handle_response_error(response)
+
+        return response.json()
+
+    async def list_products(
+        self, vendor_id: Optional[str] = None, page: int = 1, per_page: int = 20
+    ) -> Dict[str, Any]:
         async def _fetch():
+            endpoint = (
+                f"/vendors/{vendor_id}/products" if vendor_id else "/products"
+            )
             return await self._request(
                 "GET",
-                "/products",
+                endpoint,
                 rate_limit_endpoint="products",
                 params={"page": page, "per_page": per_page},
             )
@@ -309,37 +406,64 @@ class BasalamClient:
         }
 
     async def register_webhook(self, url: str, events: List[str]) -> Dict[str, Any]:
-        async def _fetch():
-            return await self._request(
-                "POST",
-                "/webhooks",
-                rate_limit_endpoint="webhooks",
-                json={"url": url, "events": events},
+        settings = get_settings()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{settings.basalam_webhook_url}/webhooks",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                json={
+                    "event_ids": events,
+                    "request_method": "POST",
+                    "url": url,
+                    "is_active": True,
+                    "register_me": True,
+                },
             )
 
-        response = await self.retry_policy.execute(_fetch)
-        return response.get("data", {})
+        if response.status_code >= 400:
+            self._handle_response_error(response)
+
+        return response.json()
+
+    async def subscribe_user_to_webhook(
+        self, webhook_id: str, access_token: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Subscribe the vendor to a webhook so their events flow to it."""
+        token = access_token or self.access_token
+        settings = get_settings()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{settings.basalam_webhook_url}/webhooks/{webhook_id}/subscribe",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        if response.status_code >= 400:
+            self._handle_response_error(response)
+
+        return response.json()
 
     async def list_webhooks(self) -> Dict[str, Any]:
-        async def _fetch():
-            return await self._request(
-                "GET",
-                "/webhooks",
-                rate_limit_endpoint="webhooks",
+        settings = get_settings()
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{settings.basalam_webhook_url}/webhooks",
+                headers={"Authorization": f"Bearer {self.access_token}"},
             )
 
-        response = await self.retry_policy.execute(_fetch)
-        return {
-            "webhooks": response.get("data", []),
-        }
+        if response.status_code >= 400:
+            self._handle_response_error(response)
+
+        return {"webhooks": response.json().get("data", [])}
 
     async def delete_webhook(self, webhook_id: str) -> Dict[str, Any]:
-        async def _fetch():
-            return await self._request(
-                "DELETE",
-                f"/webhooks/{webhook_id}",
-                rate_limit_endpoint="webhooks",
+        settings = get_settings()
+        async with httpx.AsyncClient() as client:
+            response = await client.delete(
+                f"{settings.basalam_webhook_url}/webhooks/{webhook_id}",
+                headers={"Authorization": f"Bearer {self.access_token}"},
             )
 
-        response = await self.retry_policy.execute(_fetch)
-        return response.get("data", {})
+        if response.status_code >= 400:
+            self._handle_response_error(response)
+
+        return response.json()

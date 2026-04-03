@@ -8,12 +8,13 @@ This is an ADAPTER in Hexagonal Architecture:
 - Handles Basalam-specific API calls
 - Translates Basalam API responses to internal models
 """
-import httpx
 import hashlib
 import hmac
+import logging
 from datetime import datetime, timedelta
-from uuid import UUID
 from typing import List, Optional, Dict, Any
+
+import httpx
 
 from src.core.config import get_settings
 from ..ports import (
@@ -24,11 +25,13 @@ from ..ports import (
     OAuthConfig,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class BasalamConnectorAdapter(ShopConnectorPort):
     """
     Basalam-specific implementation of ShopConnectorPort
-    
+
     Handles:
     - OAuth authentication with Basalam
     - Product sync (products, variants, images)
@@ -37,46 +40,51 @@ class BasalamConnectorAdapter(ShopConnectorPort):
     - Webhook management
     - Category detection
     """
-    
-    API_BASE_URL = "https://api.basalam.com"
-    
+
+    # Basalam numeric event IDs for webhooks
+    EVENT_PRODUCT_CHANGES = 8
+    EVENT_NEW_ORDER = 5
+    EVENT_PARCEL_CHANGES = 7
+
     def __init__(self, credentials: Optional[ShopCredentials] = None):
         self.credentials = credentials
         self._client: Optional[httpx.AsyncClient] = None
-    
+        self._vendor_id: Optional[str] = None
+
+    def set_vendor_id(self, vendor_id: str) -> None:
+        """Set vendor_id explicitly (extracted from integration.external_shop_id)."""
+        self._vendor_id = vendor_id
+
     @property
     def platform_code(self) -> str:
         return "basalam"
-    
+
     @property
     def oauth_config(self) -> OAuthConfig:
         _s = get_settings()
         return OAuthConfig(
             client_id=_s.basalam_client_id,
             client_secret=_s.basalam_client_secret.get_secret_value(),
-            authorize_url=f"{self.API_BASE_URL}/oauth/authorize",
-            token_url=f"{self.API_BASE_URL}/oauth/token",
-            redirect_uri=f"{_s.base_url}/integrations/basalam/callback",
+            authorize_url="https://basalam.com/accounts/sso",
+            token_url=f"{_s.basalam_auth_url}/oauth/token",
+            redirect_uri=f"{_s.base_url}/api/v1/shops/integrations/basalam/callback",
             scopes=[
-                "vendor.products.read",
-                "vendor.products.write",
-                "vendor.orders.read",
-                "vendor.orders.write",
-                "vendor.inventory.write",
+                "vendor.product.read",
+                "vendor.parcel.read",
                 "vendor.shipping.read",
-                "vendor.webhooks.write",
             ]
         )
-    
+
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client with auth headers"""
         if self._client is None:
             headers = {}
             if self.credentials and self.credentials.access_token:
                 headers["Authorization"] = f"Bearer {self.credentials.access_token}"
-            
+
+            settings = get_settings()
             self._client = httpx.AsyncClient(
-                base_url=self.API_BASE_URL,
+                base_url=settings.basalam_api_url,
                 headers=headers,
                 timeout=30.0
             )
@@ -108,9 +116,10 @@ class BasalamConnectorAdapter(ShopConnectorPort):
     
     async def refresh_credentials(self, credentials: ShopCredentials) -> ShopCredentials:
         """Refresh expired Basalam tokens"""
+        _s = get_settings()
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                "/oauth/token",
+                f"{_s.basalam_auth_url}/oauth/token",
                 data={
                     "grant_type": "refresh_token",
                     "refresh_token": credentials.refresh_token,
@@ -132,37 +141,49 @@ class BasalamConnectorAdapter(ShopConnectorPort):
     # ---- Product Operations ----
     
     async def fetch_products(self, page: int = 1, limit: int = 50) -> List[ShopProducts]:
-        """Fetch products from Basalam"""
+        """Fetch products from Basalam.
+
+        Calls GET /vendors/{vendor_id}/products with page-based pagination.
+        The vendor_id must be set via credentials or set_vendor_id().
+        """
+        vendor_id = self._vendor_id
+        if not vendor_id:
+            logger.warning("No vendor_id available for fetch_products")
+            return []
+
         client = await self._get_client()
-        
+
         response = await client.get(
-            "/vendor/products",
+            f"/vendors/{vendor_id}/products",
             params={
                 "page": page,
-                "limit": limit,
-                "status": "active"
+                "per_page": limit,
             }
         )
-        
+
         if response.status_code != 200:
             return []
-        
+
         data = response.json()
         products = []
-        
+
         for item in data.get("data", []):
+            # Real Basalam shape: id (not product_id), photo{original, id}
+            photo = item.get("photo", {})
+            images = [photo["original"]] if photo and photo.get("original") else []
+
             products.append(ShopProducts(
-                external_product_id=str(item["product_id"]),
+                external_product_id=str(item.get("id", item.get("product_id", ""))),
                 title=item.get("title", ""),
                 description=item.get("description", ""),
                 price=float(item.get("price", 0)),
                 inventory=int(item.get("inventory", 0)),
                 category=item.get("category"),
-                images=[img["url"] for img in item.get("images", [])],
+                images=images,
                 variants=item.get("variants", []),
                 status=item.get("status", "active")
             ))
-        
+
         return products
     
     async def fetch_product(self, product_id: str) -> ShopProducts:
@@ -175,15 +196,19 @@ class BasalamConnectorAdapter(ShopConnectorPort):
             raise ValueError(f"Product {product_id} not found")
         
         item = response.json()
-        
+
+        # Real Basalam shape: id (not product_id), photo{original, id}
+        photo = item.get("photo", {})
+        images = [photo["original"]] if photo and photo.get("original") else []
+
         return ShopProducts(
-            external_product_id=str(item["product_id"]),
+            external_product_id=str(item.get("id", item.get("product_id", ""))),
             title=item.get("title", ""),
             description=item.get("description", ""),
             price=float(item.get("price", 0)),
             inventory=int(item.get("inventory", 0)),
             category=item.get("category"),
-            images=[img["url"] for img in item.get("images", [])],
+            images=images,
             variants=item.get("variants", []),
             status=item.get("status", "active")
         )
@@ -265,40 +290,61 @@ class BasalamConnectorAdapter(ShopConnectorPort):
     # ---- Webhook Operations ----
     
     async def register_webhook(self, webhook_url: str, event_types: List[str]) -> bool:
-        """Register webhook with Basalam"""
-        client = await self._get_client()
-        
-        response = await client.post(
-            "/vendor/webhooks",
-            json={
-                "url": webhook_url,
-                "events": event_types
-            }
-        )
-        
-        return response.status_code in [200, 201]
+        """Register webhook with Basalam using numeric event_ids.
+
+        Uses settings.basalam_webhook_url for the correct endpoint.
+        Event IDs: 8=PRODUCT_CREATE_CHANGES, 5=VENDOR_NEW_ORDER, 7=VENDOR_PARCEL_CHANGES
+        """
+        _s = get_settings()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{_s.basalam_webhook_url}/webhooks",
+                headers={"Authorization": f"Bearer {self.credentials.access_token}"}
+                if self.credentials and self.credentials.access_token else {},
+                json={
+                    "event_ids": [self.EVENT_PRODUCT_CHANGES, self.EVENT_NEW_ORDER, self.EVENT_PARCEL_CHANGES],
+                    "request_method": "POST",
+                    "url": webhook_url,
+                    "is_active": True,
+                    "register_me": True,
+                }
+            )
+
+            return response.status_code in [200, 201]
     
     async def unregister_webhook(self, webhook_id: str) -> bool:
-        """Unregister webhook"""
-        client = await self._get_client()
-        
-        response = await client.delete(f"/vendor/webhooks/{webhook_id}")
-        
-        return response.status_code == 204
+        """Unregister webhook using Basalam webhook service URL"""
+        _s = get_settings()
+        async with httpx.AsyncClient() as client:
+            response = await client.delete(
+                f"{_s.basalam_webhook_url}/webhooks/{webhook_id}",
+                headers=(
+                    {"Authorization": f"Bearer {self.credentials.access_token}"}
+                    if self.credentials and self.credentials.access_token else {}
+                ),
+            )
+            return response.status_code in [200, 204]
     
     async def verify_webhook_signature(self, payload: bytes, signature: str) -> bool:
-        """Verify Basalam webhook signature"""
+        """Verify Basalam webhook signature (HMAC-SHA256).
+
+        Basalam sends ``X-Basalam-Signature: sha256=<hex>`` — the ``sha256=``
+        prefix must be stripped before comparing with the computed digest.
+        """
         if not self.credentials:
             return False
-        
+
         secret = self.credentials.extra.get("webhook_secret", "")
-        expected_signature = hmac.new(
+        expected = hmac.new(
             secret.encode(),
             payload,
-            hashlib.sha256
+            hashlib.sha256,
         ).hexdigest()
-        
-        return hmac.compare_digest(signature, expected_signature)
+
+        # Strip the "sha256=" prefix if present
+        received = signature.removeprefix("sha256=")
+
+        return hmac.compare_digest(received, expected)
     
     # ---- Shipping Operations ----
     

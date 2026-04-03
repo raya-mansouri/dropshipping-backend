@@ -216,7 +216,20 @@ class WebhookProcessor(ABC):
 
 
 class WebhookProcessorRegistry:
-    """Registry for managing webhook processors by platform and event type"""
+    """Registry for managing webhook processors by platform and event type.
+
+    Supports both string event types (e.g. "product.created") and numeric
+    Basalam event IDs. Numeric IDs are resolved to string event types via
+    the BASALAM_EVENT_MAP before lookup.
+    """
+
+    # Basalam numeric event_id → internal event type string
+    BASALAM_EVENT_MAP: Dict[int, str] = {
+        8: "product.changes",      # PRODUCT_CREATE_CHANGES
+        5: "order.created",        # VENDOR_NEW_ORDER
+        7: "order.parcel_changed", # VENDOR_PARCEL_CHANGES
+        3: "inventory.changed",    # VENDOR_ORDER_ITEM_CHANGES
+    }
 
     def __init__(self):
         self._processors: Dict[str, Dict[str, WebhookProcessor]] = {}
@@ -229,9 +242,33 @@ class WebhookProcessorRegistry:
             self._processors[platform_id] = {}
         self._processors[platform_id][event_type] = processor
 
-    def get(self, platform_id: str, event_type: str) -> Optional[WebhookProcessor]:
-        """Get processor for a specific platform and event type"""
-        return self._processors.get(platform_id, {}).get(event_type)
+    def get(
+        self,
+        platform_id: str,
+        event_type: Optional[str] = None,
+        event_id: Optional[int] = None,
+    ) -> Optional[WebhookProcessor]:
+        """
+        Get processor for a specific platform and event type.
+
+        For Basalam, pass ``event_id`` (numeric) which is resolved to a
+        string event type via ``BASALAM_EVENT_MAP``.
+        For other platforms, pass ``event_type`` directly.
+        """
+        resolved = event_type
+        if event_id is not None and platform_id == "basalam":
+            resolved = self.BASALAM_EVENT_MAP.get(event_id)
+            if resolved is None:
+                logger.warning(
+                    f"Unknown Basalam event_id: {event_id}, "
+                    f"known: {list(self.BASALAM_EVENT_MAP.keys())}"
+                )
+                return None
+
+        if resolved is None:
+            return None
+
+        return self._processors.get(platform_id, {}).get(resolved)
 
     def list_platforms(self) -> list[str]:
         """List all registered platforms"""

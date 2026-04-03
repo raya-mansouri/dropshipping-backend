@@ -20,6 +20,16 @@ class BasalamConnector(ShopConnector):
     def __init__(self, credentials: Optional[Dict[str, Any]] = None):
         super().__init__(credentials)
         self._client: Optional[BasalamClient] = None
+        self._vendor_id: Optional[str] = None
+
+    @property
+    def vendor_id(self) -> Optional[str]:
+        """Get vendor_id from credentials or explicitly set value."""
+        return self._vendor_id or (self._credentials.get("vendor_id") if self._credentials else None)
+
+    def set_vendor_id(self, vendor_id: str) -> None:
+        """Explicitly set vendor_id (useful when extracted from external_shop_id)."""
+        self._vendor_id = vendor_id
 
     def _get_client(self) -> BasalamClient:
         if self._client is None:
@@ -83,7 +93,7 @@ class BasalamConnector(ShopConnector):
 
         try:
             client = self._get_client()
-            await client.list_products(page=1, per_page=1)
+            await client.list_products(vendor_id=self.vendor_id, page=1, per_page=1)
             return True
         except Exception:
             return False
@@ -91,16 +101,17 @@ class BasalamConnector(ShopConnector):
     async def get_products(self) -> List[Product]:
         await self._ensure_connected()
         client = self._get_client()
+        vendor_id = self.vendor_id
 
         products = []
         page = 1
         per_page = 50
 
         while True:
-            result = await client.list_products(page=page, per_page=per_page)
+            result = await client.list_products(vendor_id=vendor_id, page=page, per_page=per_page)
             product_list = result.get("products", [])
             pagination = result.get("pagination", {})
-            total_pages = pagination.get("total_pages", 1)
+            total_pages = pagination.get("total_pages", pagination.get("total_page", 1))
 
             for p in product_list:
                 products.append(self._map_product(p))
@@ -202,17 +213,20 @@ class BasalamConnector(ShopConnector):
         for v in data.get("variants", []):
             variants.append(
                 ProductVariant(
-                    variant_id=v.get("variant_id", ""),
+                    variant_id=v.get("variant_id", v.get("id", "")),
                     sku=v.get("sku"),
                     title=v.get("title"),
                     price=v.get("price"),
-                    inventory=v.get("inventory", 0),
+                    inventory=v.get("inventory", v.get("stock", 0)),
                     attributes=v.get("attributes", {}),
                 )
             )
 
+        # Handle both 'id' (real Basalam) and 'product_id' (legacy)
+        product_id = str(data.get("product_id") or data.get("id", ""))
+
         return Product(
-            product_id=data.get("product_id", ""),
+            product_id=product_id,
             title=data.get("title", ""),
             description=data.get("description", ""),
             price=float(data.get("price", 0)),

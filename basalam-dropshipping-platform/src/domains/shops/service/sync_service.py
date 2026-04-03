@@ -10,8 +10,9 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..repository import SyncJobRepository, ShopIntegrationRepository
+from ..repository import SyncJobRepository, ShopIntegrationRepository, SyncStateRepository
 from ..models import SyncJob, ShopIntegration
+from src.core.repository.unit_of_work import UnitOfWork
 
 
 class SyncService:
@@ -31,6 +32,7 @@ class SyncService:
         self.session = session
         self._sync_repository = SyncJobRepository(session)
         self._integration_repository = ShopIntegrationRepository(session)
+        self._sync_state_repository = SyncStateRepository(session)
 
     async def _get_integration_or_fail(
         self, integration_id: uuid.UUID
@@ -101,7 +103,8 @@ class SyncService:
             "scheduled_at": datetime.utcnow(),
         }
 
-        return await self._sync_repository.create(job_data)
+        async with UnitOfWork(self.session):
+            return await self._sync_repository.create(job_data)
 
     async def run_sync(self, job_id: uuid.UUID) -> SyncJob:
         """
@@ -197,7 +200,8 @@ class SyncService:
             "scheduled_at": scheduled_at,
         }
 
-        return await self._sync_repository.create(job_data)
+        async with UnitOfWork(self.session):
+            return await self._sync_repository.create(job_data)
 
     async def get_sync_status(self, job_id: uuid.UUID) -> Dict[str, Any]:
         """
@@ -228,6 +232,71 @@ class SyncService:
             "created_at": job.created_at,
         }
 
+    async def get_sync_status_by_integration(
+        self, integration_id: uuid.UUID, entity_type: str = "product"
+    ) -> Dict[str, Any]:
+        """
+        Get sync status for an integration by fetching the latest job and state.
+
+        Args:
+            integration_id: UUID of the integration
+            entity_type: Type of entity to get status for (default: product)
+
+        Returns:
+            Dictionary containing job and sync state status information
+
+        Raises:
+            ValueError: If integration not found or no sync history
+        """
+        await self._get_integration_or_fail(integration_id)
+
+        # Get latest sync job for this integration and entity type
+        job = await self._sync_repository.get_latest_by_integration(
+            integration_id, entity_type
+        )
+
+        # Get sync state for this integration and entity type
+        sync_state = await self._sync_state_repository.get_by_integration_and_type(
+            integration_id, entity_type
+        )
+
+        result = {
+            "id": None,
+            "integration_id": integration_id,
+            "entity_type": entity_type,
+            "entity_id": None,
+            "status": "never_run",
+            "retry_count": 0,
+            "error_message": None,
+            "scheduled_at": None,
+            "started_at": None,
+            "completed_at": None,
+            "created_at": None,
+            # Sync state fields
+            "sync_state_status": sync_state.status if sync_state else None,
+            "sync_mode": sync_state.sync_mode if sync_state else None,
+            "total_synced": sync_state.total_synced if sync_state else 0,
+            "created_count": sync_state.created_count if sync_state else 0,
+            "updated_count": sync_state.updated_count if sync_state else 0,
+            "failed_count": sync_state.failed_count if sync_state else 0,
+            "last_sync_timestamp": sync_state.last_sync_timestamp if sync_state else None,
+        }
+
+        if job:
+            result.update({
+                "id": job.id,
+                "entity_id": job.entity_id,
+                "status": job.status,
+                "retry_count": int(job.retry_count) if job.retry_count else 0,
+                "error_message": job.error_message,
+                "scheduled_at": job.scheduled_at,
+                "started_at": job.started_at,
+                "completed_at": job.completed_at,
+                "created_at": job.created_at,
+            })
+
+        return result
+
     async def retry_failed_job(self, job_id: uuid.UUID) -> SyncJob:
         """
         Retry a failed sync job.
@@ -251,15 +320,15 @@ class SyncService:
                 "Only 'failed' jobs can be retried."
             )
 
-        await self._sync_repository.increment_retry(job_id)
-        await self._sync_repository.update_status(job_id, "pending")
+        async with UnitOfWork(self.session):
+            await self._sync_repository.increment_retry(job_id)
+            await self._sync_repository.update_status(job_id, "pending")
 
-        job = await self._get_job_or_fail(job_id)
-        job.error_message = None
-        job.scheduled_at = datetime.utcnow()
-        await self.session.flush()
+            job = await self._get_job_or_fail(job_id)
+            job.error_message = None
+            job.scheduled_at = datetime.utcnow()
 
-        return job
+        return await self._get_job_or_fail(job_id)
 
     async def cancel_job(self, job_id: uuid.UUID) -> SyncJob:
         """
@@ -282,6 +351,7 @@ class SyncService:
                 "Only 'pending' jobs can be cancelled."
             )
 
-        await self._sync_repository.update_status(job_id, "cancelled")
+        async with UnitOfWork(self.session):
+            await self._sync_repository.update_status(job_id, "cancelled")
 
         return await self._get_job_or_fail(job_id)

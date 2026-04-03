@@ -40,6 +40,10 @@ from src.integrations.webhooks.security import (
 from src.integrations.webhooks.idempotency import IdempotencyManager
 from src.integrations.webhooks.retry import RetryScheduler
 from src.integrations.webhooks.processors.base import WebhookProcessorRegistry
+from src.integrations.webhooks.processors.product import ProductWebhookProcessor
+from src.integrations.webhooks.processors.order import OrderWebhookProcessor
+from src.integrations.webhooks.processors.inventory import InventoryWebhookProcessor
+from src.integrations.webhooks.processors.payment import PaymentWebhookProcessor
 from src.core.redis_client import get_redis_client
 from src.core.webhook_metrics import (
     record_webhook_received,
@@ -52,6 +56,53 @@ from src.core.webhook_metrics import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
+
+
+def _build_processor_registry(
+    secret: str, session: AsyncSession
+) -> WebhookProcessorRegistry:
+    """
+    Build and return a fully-wired processor registry.
+
+    Instantiates all webhook processors with the given secret and DB session
+    and registers them for their respective platform + event_type combinations.
+
+    For Basalam, numeric event_ids are resolved to string event types via
+    WebhookProcessorRegistry.BASALAM_EVENT_MAP at lookup time.
+    """
+    registry = WebhookProcessorRegistry()
+
+    product_proc = ProductWebhookProcessor(secret=secret, db_session=session)
+    order_proc = OrderWebhookProcessor(secret=secret, db_session=session)
+    inventory_proc = InventoryWebhookProcessor(secret=secret, db_session=session)
+    payment_proc = PaymentWebhookProcessor(secret=secret, db_session=session)
+
+    # Basalam event_id → resolved event_type at lookup time
+    #   8 → "product.changes"
+    #   5 → "order.created"
+    #   7 → "order.parcel_changed"
+    registry.register("basalam", "product.changes", product_proc)
+    registry.register("basalam", "order.created", order_proc)
+    registry.register("basalam", "order.parcel_changed", order_proc)
+    registry.register("basalam", "inventory.changed", inventory_proc)
+
+    # Non-Basalam platforms (string event types)
+    for event_type in ("order.created", "order.updated"):
+        registry.register("shopify", event_type, order_proc)
+        registry.register("woocommerce", event_type, order_proc)
+
+    for event_type in ("inventory.updated",):
+        registry.register("shopify", event_type, inventory_proc)
+
+    for event_type in ("payment.completed", "payment.failed"):
+        registry.register("shopify", event_type, payment_proc)
+        registry.register("woocommerce", event_type, payment_proc)
+
+    for event_type in ("product.created", "product.updated"):
+        registry.register("shopify", event_type, product_proc)
+        registry.register("woocommerce", event_type, product_proc)
+
+    return registry
 
 
 class WebhookResponse(BaseModel):
@@ -401,8 +452,26 @@ async def receive_webhook(
     processing_start = time_module.time()
     record_webhook_received(platform_code, event_type)
 
-    processor_registry = WebhookProcessorRegistry()
-    processor = processor_registry.get(platform_code, event_type)
+    # Build registry with processors wired to this session + secret
+    secret_for_processor = (
+        integration.webhook_secret_encrypted
+        if integration.webhook_secret_encrypted
+        else ""
+    )
+    processor_registry = _build_processor_registry(
+        secret=secret_for_processor, session=session
+    )
+
+    # For Basalam, route by numeric event_id; for others, route by string event_type
+    numeric_event_id = payload.get("event_id")
+    if isinstance(numeric_event_id, int):
+        processor = processor_registry.get(
+            platform_id=platform_code, event_id=numeric_event_id
+        )
+    else:
+        processor = processor_registry.get(
+            platform_id=platform_code, event_type=event_type
+        )
 
     if processor:
         try:

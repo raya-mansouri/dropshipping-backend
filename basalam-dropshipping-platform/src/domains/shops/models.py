@@ -9,7 +9,6 @@ from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, UniqueCons
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from src.core.database import Base, TimestampMixin, UUIDMixin
-import uuid
 
 
 class Platform(Base, UUIDMixin, TimestampMixin):
@@ -91,6 +90,11 @@ class ShopIntegration(Base, UUIDMixin, TimestampMixin):
     shop = relationship("Shop", back_populates="integrations")
     platform = relationship("Platform", back_populates="integrations")
     sync_jobs = relationship("SyncJob", back_populates="integration")
+    sync_states = relationship("SyncState", back_populates="integration", cascade="all, delete-orphan")
+
+    @property
+    def platform_code(self) -> str | None:
+        return self.platform.code if self.platform else None
     
     __table_args__ = (
         UniqueConstraint('platform_id', 'external_shop_id', name='uq_platform_shop'),
@@ -119,6 +123,37 @@ class SyncJob(Base, UUIDMixin, TimestampMixin):
     
     # Relationships
     integration = relationship("ShopIntegration", back_populates="sync_jobs")
+
+
+class SyncState(Base, UUIDMixin, TimestampMixin):
+    """
+    Sync state tracking per integration per entity type
+
+    Tracks sync cursor, timestamps, counts, and status per entity type per integration.
+    """
+
+    __tablename__ = "sync_states"
+
+    integration_id = Column(UUID(as_uuid=True), ForeignKey("shop_integrations.id"), nullable=False)
+    entity_type = Column(String(50), nullable=False)  # product, inventory, order
+    status = Column(String(20), default="idle")  # idle, syncing, error
+    sync_mode = Column(String(20), default="full")  # full, delta
+
+    last_sync_timestamp = Column(DateTime)
+    cursor_token = Column(String(500))
+
+    total_synced = Column(Integer, default=0)
+    created_count = Column(Integer, default=0)
+    updated_count = Column(Integer, default=0)
+    failed_count = Column(Integer, default=0)
+    last_error = Column(String(2000))
+
+    # Relationships
+    integration = relationship("ShopIntegration", back_populates="sync_states")
+
+    __table_args__ = (
+        UniqueConstraint("integration_id", "entity_type", name="uq_sync_state_integration_entity"),
+    )
 
 
 class ShippingMethod(Base, UUIDMixin, TimestampMixin):

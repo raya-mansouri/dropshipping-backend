@@ -47,9 +47,15 @@ registry = ConnectorRegistry()
 
 
 def get_connector(
-    platform_code: str, credentials: Optional[Dict] = None
+    platform_code: str,
+    credentials: Optional[Dict] = None,
+    *,
+    vendor_id: Optional[str] = None,
 ) -> ShopConnector:
-    return registry.get_connector(platform_code, credentials)
+    connector = registry.get_connector(platform_code, credentials)
+    if vendor_id and hasattr(connector, 'set_vendor_id'):
+        connector.set_vendor_id(vendor_id)
+    return connector
 
 
 def register_connector(

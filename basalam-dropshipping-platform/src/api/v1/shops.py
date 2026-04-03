@@ -26,6 +26,7 @@ from src.domains.shops.schemas import (
     OAuthStartResponse,
     OAuthCallbackRequest,
     SyncJobResponse,
+    SyncStatusResponse,
 )
 from src.domains.shops.service import ShopService, IntegrationService, SyncService
 
@@ -132,7 +133,10 @@ async def connect_platform(
             integration = await service.connect_shop(
                 shop_id=shop_id,
                 platform_code=connect_data.platform_code,
-                credentials=connect_data.credentials,
+                credentials={
+                    **connect_data.credentials,
+                    "connection_type": connect_data.connection_type,
+                },
             )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -191,20 +195,19 @@ async def start_oauth(
     await verify_shop_ownership(shop_id, current_user, session)
 
     service = IntegrationService(session)
-    try:
-        result = await service.handle_oauth_callback(
-            shop_id=shop_id,
-            platform_code=oauth_data.platform_code.value,
-            code="",
-        )
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    async with UnitOfWork(session):
+        try:
+            result = await service.start_oauth(
+                shop_id=shop_id,
+                platform_code=oauth_data.platform_code.value,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
-    # Return OAuth start data — the service generates the URL/state
     return OAuthStartResponse(
-        authorize_url=result.get("authorize_url", ""),
-        state=result.get("state", ""),
-        integration_id=result.get("integration_id", ""),
+        authorize_url=result["authorize_url"],
+        state=result["state"],
+        integration_id=result["integration_id"],
     )
 
 
@@ -219,15 +222,15 @@ async def oauth_callback(
     await verify_shop_ownership(shop_id, current_user, session)
 
     service = IntegrationService(session)
-
-    try:
-        integration = await service.handle_oauth_callback(
-            shop_id=shop_id,
-            platform_code="",  # Extracted from state
-            code=callback_data.code,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    async with UnitOfWork(session):
+        try:
+            integration = await service.handle_oauth_callback(
+                shop_id=shop_id,
+                code=callback_data.code,
+                state=callback_data.state,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     return integration
 
 
@@ -256,10 +259,11 @@ async def sync_products(
     return SyncJobResponse.model_validate(job)
 
 
-@router.get("/{shop_id}/sync/status")
+@router.get("/{shop_id}/sync/status", response_model=SyncStatusResponse)
 async def get_sync_status(
     shop_id: UUID,
     integration_id: UUID = Query(...),
+    entity_type: str = Query("product", pattern="^(product|inventory|order)$"),
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -267,4 +271,4 @@ async def get_sync_status(
     await verify_shop_ownership(shop_id, current_user, session)
 
     service = SyncService(session)
-    return await service.get_sync_status(integration_id)
+    return await service.get_sync_status_by_integration(integration_id, entity_type)

@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .base import WebhookProcessor
+from src.core.repository.unit_of_work import UnitOfWork
 
 
 logger = logging.getLogger(__name__)
@@ -81,14 +82,14 @@ class PaymentWebhookProcessor(WebhookProcessor):
         if not order_id:
             return
 
-        stmt = select(Order).where(Order.external_order_id == order_id)
-        result = await self.db_session.execute(stmt)
-        order = result.scalar_one_or_none()
+        async with UnitOfWork(self.db_session):
+            stmt = select(Order).where(Order.external_order_id == order_id)
+            result = await self.db_session.execute(stmt)
+            order = result.scalar_one_or_none()
 
-        if order:
-            order.payment_status = "paid"
-            await self.db_session.commit()
-            logger.info(f"Marked order {order_id} as paid")
+            if order:
+                order.payment_status = "paid"
+                logger.info(f"Marked order {order_id} as paid")
 
     async def _handle_payment_failed(self, data: Dict[str, Any]) -> None:
         """Handle failed payment"""
@@ -98,11 +99,11 @@ class PaymentWebhookProcessor(WebhookProcessor):
         if not order_id:
             return
 
-        stmt = select(Order).where(Order.external_order_id == order_id)
-        result = await self.db_session.execute(stmt)
-        order = result.scalar_one_or_none()
+        async with UnitOfWork(self.db_session):
+            stmt = select(Order).where(Order.external_order_id == order_id)
+            result = await self.db_session.execute(stmt)
+            order = result.scalar_one_or_none()
 
-        if order:
-            order.payment_status = "failed"
-            await self.db_session.commit()
-            logger.info(f"Marked order {order_id} as payment failed")
+            if order:
+                order.payment_status = "failed"
+                logger.info(f"Marked order {order_id} as payment failed")
