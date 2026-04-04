@@ -442,6 +442,10 @@ class FranchiseValidator:
                     errors.append("Category is forbidden")
 
                 franchise_percent = category.franchise_percent or 0
+
+                if listing.margin_percent < 0:
+                    errors.append("Margin cannot be negative")
+
                 if listing.margin_percent < franchise_percent:
                     errors.append(
                         f"Margin {listing.margin_percent}% does not meet "

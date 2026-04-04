@@ -246,6 +246,10 @@ class WebhookNotificationAdapter(NotificationPort):
                 "event": "price.changed",
                 "description": "Sent when product price changes"
             },
+            "product_forbidden": {
+                "event": "product.forbidden",
+                "description": "Sent when a product is rejected by Basalam"
+            },
         }
         return templates.get(template_id)
     

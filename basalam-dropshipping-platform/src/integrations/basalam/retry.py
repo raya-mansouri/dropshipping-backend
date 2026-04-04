@@ -1,8 +1,12 @@
 import asyncio
+import functools
+import logging
 import random
-from typing import Callable, Any, TypeVar
+from typing import Callable, Any, Tuple, Type, TypeVar
 
 from .exceptions import TokenExpiredError, RateLimitError, BasalamAPIError
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -58,3 +62,66 @@ class BasalamRetryPolicy:
                 raise
 
         raise last_exception
+
+
+def retry_on_error(
+    max_attempts: int = 3,
+    retryable_exceptions: Tuple[Type[Exception], ...] = (Exception,),
+    base_delay: float = 1.0,
+    jitter_factor: float = 0.3,
+):
+    """Decorator that retries async functions with exponential backoff and jitter.
+
+    Args:
+        max_attempts: Maximum number of attempts before giving up.
+        retryable_exceptions: Tuple of exception types that should trigger a retry.
+        base_delay: Base delay in seconds for exponential backoff.
+        jitter_factor: Fraction of delay to add as random jitter (±30%).
+
+    Returns:
+        A decorator that wraps an async function with retry logic.
+
+    Usage::
+
+        @retry_on_error(max_attempts=5, retryable_exceptions=(ConnectionError,))
+        async def fetch_data():
+            ...
+    """
+
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_attempts):
+                try:
+                    result = await func(*args, **kwargs)
+                    if attempt > 0:
+                        from src.core.metrics import retry_success_total
+
+                        retry_success_total.labels(
+                            exception_type=type(last_exception).__name__
+                        ).inc()
+                    return result
+                except retryable_exceptions as e:
+                    last_exception = e
+                    from src.core.metrics import retry_attempts_total
+
+                    retry_attempts_total.labels(
+                        exception_type=type(e).__name__,
+                        attempt=str(attempt + 1),
+                    ).inc()
+                    if attempt >= max_attempts - 1:
+                        from src.core.metrics import retry_exhausted_total
+
+                        retry_exhausted_total.labels(
+                            exception_type=type(e).__name__
+                        ).inc()
+                        raise
+                    delay = base_delay * (2**attempt)
+                    jitter = delay * jitter_factor * random.uniform(-1, 1)
+                    await asyncio.sleep(max(0, delay + jitter))
+            raise last_exception
+
+        return wrapper
+
+    return decorator

@@ -121,6 +121,11 @@ def require_role(*roles: str):
     return role_checker
 
 
+# ---- Admin Dependency ----
+
+require_admin = require_role("admin")
+
+
 # ---- Ownership Dependencies ----
 
 
