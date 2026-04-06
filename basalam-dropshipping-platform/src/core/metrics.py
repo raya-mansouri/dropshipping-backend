@@ -53,8 +53,43 @@ active_connections = Gauge(
     "http_active_connections", "Number of active HTTP connections", registry=registry
 )
 
+rate_limit_remaining = Gauge(
+    "rate_limit_remaining",
+    "Remaining rate limit tokens from external API",
+    ["endpoint"],
+    registry=registry,
+)
+
 queue_depth = Gauge(
     "queue_depth", "Current depth of message queue", ["queue_name"], registry=registry
+)
+
+retry_attempts_total = Counter(
+    "retry_attempts_total",
+    "Total retry attempts by exception type",
+    ["exception_type", "attempt"],
+    registry=registry,
+)
+
+retry_success_total = Counter(
+    "retry_success_total",
+    "Total successful retries after initial failure",
+    ["exception_type"],
+    registry=registry,
+)
+
+retry_exhausted_total = Counter(
+    "retry_exhausted_total",
+    "Total retries that exhausted all attempts",
+    ["exception_type"],
+    registry=registry,
+)
+
+product_status_updates_total = Counter(
+    "product_status_updates_total",
+    "Total product status updates by reason",
+    ["old_status", "new_status", "reason"],
+    registry=registry,
 )
 
 

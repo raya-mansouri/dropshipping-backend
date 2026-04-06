@@ -4,6 +4,7 @@ Inventory Sync Service
 Business logic for syncing inventory with supplier platforms
 """
 
+import structlog
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -19,6 +20,14 @@ from ..repository import (
 )
 from src.domains.shops.repository import ShopIntegrationRepository
 from src.domains.shops.models import ShopIntegration
+from src.core.events.publisher import EventPublisher
+from src.core.events.base import DomainEvent
+from src.core.events.inventory import (
+    InventoryUpdated,
+    InventorySyncCompleted,
+)
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -55,19 +64,35 @@ class InventorySyncService:
     and performing reconciliation to fix mismatches.
     """
 
-    def __init__(self, session: AsyncSession, basalam_client: Any = None):
+    def __init__(
+        self,
+        session: AsyncSession,
+        basalam_client: Any = None,
+        event_publisher: Optional[EventPublisher] = None,
+    ):
         """
         Initialize service with database session.
 
         Args:
             session: Async SQLAlchemy session for database operations
             basalam_client: Optional Basalam client for API calls
+            event_publisher: Optional EventPublisher for domain events
         """
         self.session = session
         self.basalam_client = basalam_client
+        self._event_publisher = event_publisher
         self._inventory_repo = InventoryRepository(session)
         self._log_repo = InventoryLogRepository(session)
         self._integration_repo = ShopIntegrationRepository(session)
+
+    async def _publish_event(self, event: DomainEvent) -> None:
+        """Safely publish domain event. Non-blocking - failures are logged but don't raise."""
+        if self._event_publisher is None:
+            return
+        try:
+            await self._event_publisher.publish(topic="events", event=event)
+        except Exception as e:
+            logger.warning("failed_to_publish_event", event_type=event.event_type, error=str(e))
 
     async def _get_basalam_client(self, integration_id: uuid.UUID) -> Any:
         """Get or create Basalam client for integration."""

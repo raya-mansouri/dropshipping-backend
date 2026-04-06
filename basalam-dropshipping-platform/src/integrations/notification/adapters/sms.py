@@ -5,7 +5,10 @@ Implements NotificationPort for SMS notifications
 
 Supports multiple SMS providers: Kavenegar, Twilio, etc.
 """
+import asyncio
+
 import httpx
+import structlog
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
@@ -77,7 +80,46 @@ class KavenegarSMSAdapter(NotificationPort):
                 error=str(e),
                 provider=self.provider_name
             )
-    
+
+    async def send_with_retry(
+        self,
+        request: NotificationRequest,
+        max_retries: int = 3,
+        delays: list[float] = None,
+    ) -> NotificationResponse:
+        """Send with retry logic and exponential backoff."""
+        logger = structlog.get_logger(__name__)
+
+        if delays is None:
+            delays = [1.0, 2.0, 4.0]
+
+        for attempt in range(max_retries):
+            response = await self.send(request)
+            if response.success:
+                return response
+
+            logger.warning(
+                "sms_send_failed_retrying",
+                provider=self.provider_name,
+                attempt=attempt + 1,
+                max_retries=max_retries,
+                error=response.error,
+            )
+
+            if attempt < max_retries - 1:
+                await asyncio.sleep(delays[attempt])
+
+        logger.error(
+            "sms_send_exhausted_retries",
+            provider=self.provider_name,
+            max_retries=max_retries,
+        )
+        return NotificationResponse(
+            success=False,
+            error=f"Failed after {max_retries} retries",
+            provider=self.provider_name,
+        )
+
     async def send_batch(self, requests: List[NotificationRequest]) -> List[NotificationResponse]:
         """Send multiple SMS"""
         responses = []

@@ -12,7 +12,7 @@ Tasks:
 """
 
 import hashlib
-import logging
+import structlog
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -29,7 +29,7 @@ from src.domains.products.models import ProductMedia
 from src.core.config import get_settings
 from src.core.database import async_session_maker
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class ImageServiceError(Exception):
@@ -144,10 +144,10 @@ class StorageService:
                 Body=content,
                 ContentType=mime_type,
             )
-            logger.info(f"Uploaded image to storage: {key}")
+            logger.info("uploaded_image_to_storage", key=key)
             return key
         except Exception as e:
-            logger.error(f"Failed to upload to storage: {e}")
+            logger.error("failed_to_upload_to_storage", error=str(e))
             raise ImageUploadError(f"Failed to upload image: {e}") from e
 
     async def exists(self, key: str) -> bool:
@@ -166,7 +166,7 @@ class StorageService:
             client.delete_object(Bucket=self.config.minio_bucket, Key=key)
             return True
         except Exception as e:
-            logger.warning(f"Failed to delete image {key}: {e}")
+            logger.warning("failed_to_delete_image", key=key, error=str(e))
             return False
 
     def generate_cdn_url(self, key: str) -> str:
@@ -253,14 +253,18 @@ class ImageProcessor:
             mime_type = self.MIME_TYPES.get(target_format, "image/webp")
 
             logger.info(
-                f"Image processed: {len(content)} -> {len(processed_content)} bytes, "
-                f"{width}x{height}, {mime_type}"
+                "image_processed",
+                original_size=len(content),
+                processed_size=len(processed_content),
+                width=width,
+                height=height,
+                mime_type=mime_type,
             )
 
             return processed_content, mime_type, width, height
 
         except Exception as e:
-            logger.error(f"Image optimization failed: {e}")
+            logger.error("image_optimization_failed", error=str(e))
             raise ImageOptimizationError(f"Failed to optimize image: {e}") from e
 
     def compute_hash(self, content: bytes) -> str:
@@ -325,7 +329,7 @@ class ImageService:
                 response = await client.get(url)
                 response.raise_for_status()
                 content = response.content
-                logger.info(f"Downloaded image from {url}: {len(content)} bytes")
+                logger.info("downloaded_image", url=url, size_bytes=len(content))
                 return content
         except httpx.HTTPStatusError as e:
             raise ImageDownloadError(
@@ -358,7 +362,7 @@ class ImageService:
 
         existing = await self._find_by_hash(hash_value, session)
         if existing:
-            logger.info(f"Duplicate image detected, returning existing: {existing.id}")
+            logger.info("duplicate_image_detected", existing_id=str(existing.id))
             cdn_url = self.storage.generate_cdn_url(existing.storage_key)
             return cdn_url, existing
 
@@ -386,7 +390,7 @@ class ImageService:
         )
 
         cdn_url = self.storage.generate_cdn_url(key)
-        logger.info(f"Image uploaded successfully: {cdn_url}")
+        logger.info("image_uploaded_successfully", cdn_url=cdn_url)
 
         return cdn_url, media
 
@@ -465,7 +469,7 @@ class ImageService:
         )
         session.add(media)
         await session.flush()
-        logger.info(f"Created media record: {media.id}")
+        logger.info("created_media_record", media_id=str(media.id))
         return media
 
     async def download_and_process(
@@ -504,10 +508,10 @@ class ImageService:
             await self.storage.delete(media.storage_key)
             await session.delete(media)
             await session.flush()
-            logger.info(f"Deleted image: {media.id}")
+            logger.info("deleted_image", media_id=str(media.id))
             return True
         except Exception as e:
-            logger.error(f"Failed to delete image: {e}")
+            logger.error("failed_to_delete_image_error", error=str(e))
             return False
 
 

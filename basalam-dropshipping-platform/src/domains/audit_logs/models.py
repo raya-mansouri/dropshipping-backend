@@ -4,10 +4,9 @@ Audit Logs Domain Models
 Entity change audit trail
 """
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Index
+from sqlalchemy import Column, String, DateTime, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from src.core.database import Base, TimestampMixin, UUIDMixin
-import uuid
 
 
 class AuditLog(Base, UUIDMixin, TimestampMixin):
@@ -22,15 +21,13 @@ class AuditLog(Base, UUIDMixin, TimestampMixin):
     entity_type = Column(String(50), nullable=False)  # order, product, shop, payment
     entity_id = Column(UUID(as_uuid=True), nullable=False)
 
-    action = Column(
-        String(50), nullable=False
-    )  # created, updated, deleted, status_changed
+    action = Column(String(50), nullable=False)  # created, updated, deleted, status_changed
     actor_type = Column(String(20), nullable=False)  # user, system, admin
     actor_id = Column(UUID(as_uuid=True))
 
     old_value = Column(JSONB, default=dict)
     new_value = Column(JSONB, default=dict)
-    reason = Column(Text)
+    reason = Column(String(500))
 
     created_at = Column(DateTime, nullable=False)
 

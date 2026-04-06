@@ -1,7 +1,7 @@
 import asyncio
-import logging
+import structlog
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List
 
 from celery import shared_task
@@ -17,7 +17,7 @@ from src.domains.inventory.service.reservation_service import ReservationService
 from src.domains.inventory.service.sync_service import InventorySyncService
 from src.domains.shops.repository import ShopIntegrationRepository
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 async def get_session() -> AsyncSession:
@@ -47,7 +47,7 @@ async def notify_sellers(reservations: List[InventoryReservation]) -> None:
                 metadata={"reservation_count": len(reservations)},
             )
         except Exception as e:
-            logger.error(f"Failed to notify seller {seller_id}: {e}")
+            logger.error("failed_to_notify_seller", seller_id=str(seller_id), error=str(e))
 
 
 @shared_task(bind=True, max_retries=3)
@@ -75,7 +75,7 @@ def cleanup_expired_reservations(self):
                     )
                     released += 1
                 except Exception as e:
-                    logger.error(f"Failed to release reservation {reservation.id}: {e}")
+                    logger.error("failed_to_release_reservation", reservation_id=str(reservation.id), error=str(e))
                 finally:
                     processed += 1
 
@@ -85,10 +85,12 @@ def cleanup_expired_reservations(self):
                 try:
                     await notify_sellers(expired_reservations)
                 except Exception as e:
-                    logger.error(f"Failed to notify sellers: {e}")
+                    logger.error("failed_to_notify_sellers", error=str(e))
 
             logger.info(
-                f"Cleanup completed: {processed} processed, {released} released"
+                "cleanup_completed",
+                processed=str(processed),
+                released=str(released),
             )
             return {"processed": processed, "released": released}
 
@@ -98,7 +100,7 @@ def cleanup_expired_reservations(self):
 
 @shared_task(bind=True, max_retries=3)
 def reconcile_inventory(self, integration_id: str = None):
-    logger.info(f"Starting inventory reconciliation for integration {integration_id}")
+    logger.info("starting_inventory_reconciliation", integration_id=str(integration_id))
 
     async def _reconcile():
         from src.domains.shops.models import ShopIntegration
@@ -121,9 +123,12 @@ def reconcile_inventory(self, integration_id: str = None):
                     await session.commit()
 
                     logger.info(
-                        f"Reconciliation completed for {int_id}: {result.total_variants} variants, "
-                        f"{result.matched_count} matched, {result.mismatch_count} mismatches, "
-                        f"{result.fixed_count} fixed"
+                        "reconciliation_completed",
+                        integration_id=str(int_id),
+                        total_variants=str(result.total_variants),
+                        matched_count=str(result.matched_count),
+                        mismatch_count=str(result.mismatch_count),
+                        fixed_count=str(result.fixed_count),
                     )
 
                     results.append(
@@ -138,7 +143,7 @@ def reconcile_inventory(self, integration_id: str = None):
                         }
                     )
                 except Exception as e:
-                    logger.error(f"Reconciliation failed for {int_id}: {e}")
+                    logger.error("reconciliation_failed", integration_id=str(int_id), error=str(e))
                     results.append(
                         {
                             "integration_id": str(int_id),
@@ -152,7 +157,7 @@ def reconcile_inventory(self, integration_id: str = None):
 
 @shared_task(bind=True, max_retries=3)
 def sync_inventory(self, integration_id: str = None):
-    logger.info(f"Starting inventory sync for integration {integration_id}")
+    logger.info("starting_inventory_sync", integration_id=str(integration_id))
 
     async def _sync():
         from src.domains.shops.models import ShopIntegration
@@ -174,7 +179,7 @@ def sync_inventory(self, integration_id: str = None):
                     integration = await integration_repo.get_by_id(int_id)
 
                     if not integration:
-                        logger.error(f"Integration {int_id} not found")
+                        logger.error("integration_not_found", integration_id=str(int_id))
                         continue
 
                     sync_service = InventorySyncService(session)
@@ -184,13 +189,15 @@ def sync_inventory(self, integration_id: str = None):
                     if result.success:
                         await integration_repo.update(
                             int_id,
-                            {"last_sync_at": datetime.utcnow()},
+                            {"last_sync_at": datetime.now(timezone.utc)},
                         )
                         await session.commit()
 
                     logger.info(
-                        f"Sync completed for {int_id}: {result.variants_updated}/{result.total_variants} "
-                        f"variants updated"
+                        "sync_completed",
+                        integration_id=str(int_id),
+                        variants_updated=str(result.variants_updated),
+                        total_variants=str(result.total_variants),
                     )
 
                     results.append(
@@ -203,7 +210,7 @@ def sync_inventory(self, integration_id: str = None):
                         }
                     )
                 except Exception as e:
-                    logger.error(f"Sync failed for {int_id}: {e}")
+                    logger.error("sync_failed", integration_id=str(int_id), error=str(e))
                     results.append(
                         {
                             "integration_id": str(int_id),

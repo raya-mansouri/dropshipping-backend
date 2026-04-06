@@ -13,7 +13,7 @@ Security middleware chain (in order):
 4. Signature verification
 5. Idempotency check
 """
-import logging
+import structlog
 import json
 import time as time_module
 from datetime import datetime
@@ -53,7 +53,7 @@ from src.core.webhook_metrics import (
 )
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
@@ -261,7 +261,7 @@ async def verify_signature(
     try:
         secret = secret_service.decrypt_for_verification(integration.webhook_secret_encrypted)
     except Exception as e:
-        logger.error(f"Failed to decrypt webhook secret: {e}")
+        logger.error("failed_to_decrypt_webhook_secret", error=str(e))
         raise HTTPException(
             status_code=500,
             detail="Webhook secret decryption failed"
@@ -493,7 +493,7 @@ async def receive_webhook(
                 )
         except Exception as e:
             duration = time_module.time() - processing_start
-            logger.error(f"Webhook processing error: {e}")
+            logger.error("webhook_processing_error", error=str(e))
             await event_repo.update_status(
                 webhook_event.id,
                 "failed",
@@ -511,8 +511,10 @@ async def receive_webhook(
             )
     else:
         logger.warning(
-            f"No processor registered for {platform_code}/{event_type}",
-            extra={"webhook_event_id": str(webhook_event.id)}
+            "no_processor_registered",
+            platform_code=platform_code,
+            event_type=event_type,
+            webhook_event_id=str(webhook_event.id),
         )
 
     return WebhookResponse(

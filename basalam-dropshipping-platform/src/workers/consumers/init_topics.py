@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 import asyncio
-import logging
+import structlog
 from aiokafka import AIOKafkaAdminClient
 from aiokafka.admin import NewTopic
 
 from src.core.config import get_settings
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 KAFKA_BOOTSTRAP_SERVERS = get_settings().kafka_bootstrap_servers
 
@@ -44,18 +44,18 @@ async def create_topics():
                         replication_factor=REPLICATION_FACTOR,
                     )
                 )
-                logger.info(f"Topic '{topic}' will be created")
+                logger.info("topic_will_be_created", topic=topic)
             else:
-                logger.info(f"Topic '{topic}' already exists")
+                logger.info("topic_already_exists", topic=topic)
 
         if topics_to_create:
             await admin_client.create_topics(topics_to_create)
-            logger.info(f"Successfully created {len(topics_to_create)} topics")
+            logger.info("successfully_created_topics", count=str(len(topics_to_create)))
         else:
             logger.info("All topics already exist")
 
     except Exception as e:
-        logger.error(f"Error creating topics: {e}")
+        logger.error("error_creating_topics", error=str(e))
         raise
     finally:
         if admin_client:

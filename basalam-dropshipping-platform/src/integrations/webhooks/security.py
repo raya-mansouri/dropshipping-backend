@@ -4,9 +4,9 @@ Webhook Security Module
 Security middleware for incoming webhooks: IP allowlisting, rate limiting, timestamp validation.
 """
 import ipaddress
-import logging
+import structlog
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any, Callable
 from functools import wraps
 
@@ -17,7 +17,7 @@ from src.core.config import get_settings
 from src.core.webhook_metrics import record_security_event as metrics_security_event
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class SecurityEvent:
@@ -114,8 +114,10 @@ class IPAllowlistValidator:
                 networks.append(ipaddress.ip_network(cidr, strict=False))
             except ValueError as e:
                 logger.warning(
-                    f"Invalid CIDR in allowlist: {cidr}",
-                    extra={"platform_code": platform_code, "error": str(e)}
+                    "invalid_cidr_in_allowlist",
+                    cidr=cidr,
+                    platform_code=platform_code,
+                    error=str(e),
                 )
 
         self._cache[cache_key] = networks
@@ -201,9 +203,15 @@ class WebhookRateLimiter:
             return True, None
 
         except Exception as e:
-            # On Redis error, allow the request (fail open)
-            logger.error(f"Rate limiter error: {e}")
-            return True, None
+            # Fail closed: if Redis is down, reject the request.
+            # This prevents a Redis outage from silently disabling rate limiting.
+            logger.error(
+                "rate_limiter_error_fail_closed",
+                error=str(e),
+                platform_code=platform_code,
+                integration_id=integration_id,
+            )
+            return False, 60  # Reject with a 60s retry-after
 
 
 class TimestampValidator:
@@ -363,7 +371,7 @@ class SecurityAuditLogger:
             "platform_code": platform_code,
             "integration_id": str(integration_id) if integration_id else None,
             "client_ip": client_ip,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             **(details or {}),
         }
 

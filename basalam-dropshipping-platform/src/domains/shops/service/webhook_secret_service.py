@@ -6,15 +6,15 @@ Secure generation, encryption, and rotation of webhook secrets.
 Uses Fernet symmetric encryption for storing webhook secrets.
 """
 import secrets
-import logging
-from datetime import datetime, timedelta
+import structlog
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 from cryptography.fernet import Fernet, InvalidToken
 
 from src.core.config import get_settings
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class WebhookSecretService:
@@ -44,7 +44,14 @@ class WebhookSecretService:
                 "Generate one with: from cryptography.fernet import Fernet; Fernet.generate_key()"
             )
 
-        self._fernet = Fernet(key.encode() if isinstance(key, str) else key)
+        # Validate key format before using it (prevents runtime errors on first encrypt/decrypt)
+        try:
+            self._fernet = Fernet(key.encode() if isinstance(key, str) else key)
+        except (ValueError, TypeError) as e:
+            raise ValueError(
+                f"Invalid Fernet key format: {e}. "
+                "Generate a valid key with: from cryptography.fernet import Fernet; Fernet.generate_key()"
+            ) from e
 
     def generate_secret(self) -> str:
         """
@@ -116,11 +123,12 @@ class WebhookSecretService:
         new_secret = self.generate_secret()
         new_encrypted = self.encrypt_for_storage(new_secret)
 
-        expires_at = datetime.utcnow() + self.ROTATION_OVERLAP_PERIOD
+        expires_at = datetime.now(timezone.utc) + self.ROTATION_OVERLAP_PERIOD
 
         if current_encrypted:
             logger.info(
-                f"Initiating secret rotation. Old secret valid until {expires_at}"
+                "secret_rotation_initiated",
+                old_secret_expires_at=str(expires_at),
             )
         else:
             logger.info("Generating initial webhook secret")
@@ -211,7 +219,7 @@ class WebhookSecretService:
                 return False, f"Unknown signature format: {signature_header[:20]}..."
 
         except Exception as e:
-            logger.error(f"Signature verification error: {e}")
+            logger.error("signature_verification_error", error=str(e))
             return False, str(e)
 
     def _verify_simple_signature(

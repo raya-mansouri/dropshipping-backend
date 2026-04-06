@@ -5,7 +5,7 @@ Handles order.created and order.updated events from shop platforms.
 """
 
 from typing import Dict, Any
-import logging
+import structlog
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +14,7 @@ from .base import WebhookProcessor
 from src.core.repository.unit_of_work import UnitOfWork
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class OrderWebhookProcessor(WebhookProcessor):
@@ -58,7 +58,7 @@ class OrderWebhookProcessor(WebhookProcessor):
         event_type = self.get_event_type(payload, headers)
 
         if event_type not in ("order.created", "order.updated"):
-            logger.warning(f"Unexpected event type: {event_type}")
+            logger.warning("unexpected_event_type", event_type=event_type)
             return False
 
         event_data = self.extract_event_data(payload)
@@ -70,10 +70,10 @@ class OrderWebhookProcessor(WebhookProcessor):
 
         try:
             await self._update_order_status(order_id, event_data)
-            logger.info(f"Processed order event: {order_id} - {event_type}")
+            logger.info("processed_order_event", order_id=str(order_id), event_type=event_type)
             return True
         except Exception as e:
-            logger.error(f"Failed to process order: {e}")
+            logger.error("failed_to_process_order", error=str(e))
             return False
 
     async def _update_order_status(self, order_id: str, data: Dict[str, Any]) -> None:
@@ -93,6 +93,6 @@ class OrderWebhookProcessor(WebhookProcessor):
                 if "total_price" in data:
                     order.total_amount = data["total_price"]
 
-                logger.info(f"Updated order {order_id} status to {mapped_status}")
+                logger.info("updated_order_status", order_id=str(order_id), status=mapped_status)
             else:
-                logger.warning(f"Order not found: {order_id}")
+                logger.warning("order_not_found", order_id=str(order_id))
