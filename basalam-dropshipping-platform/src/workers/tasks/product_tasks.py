@@ -4,11 +4,11 @@ Product Sync Celery Tasks
 Periodic product synchronization tasks.
 """
 import asyncio
-import logging
+import structlog
 
 from celery import shared_task
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @shared_task(
@@ -52,12 +52,12 @@ def product_sync(self):
                             integration_id=integration.id,
                         )
                         await sync_service.sync_products()
-                        logger.info(f"Product sync completed for integration {integration.id}")
+                        logger.info("product_sync_completed_for_integration", integration_id=str(integration.id))
                     except Exception as e:
-                        logger.error(f"Product sync failed for integration {integration.id}: {e}")
+                        logger.error("product_sync_failed_for_integration", integration_id=str(integration.id), error=str(e))
 
         asyncio.run(_sync())
         logger.info("Product sync task completed")
     except Exception as exc:
-        logger.error(f"Product sync task failed: {exc}")
+        logger.error("product_sync_task_failed", error=str(exc))
         raise self.retry(exc=exc)

@@ -1,10 +1,11 @@
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional, Dict, Any, Type
-import logging
+from typing import List, Optional, Dict, Any
+import structlog
 
-logger = logging.getLogger(__name__)
+from .ports import ShopConnectorPort
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -92,12 +93,16 @@ class ShippingMethod:
     carrier: Optional[str] = None
 
 
-class BaseShopConnector(ABC):
+class BaseShopConnector(ShopConnectorPort):
     """
-    Base class for shop connectors with common functionality.
+    Base implementation of ShopConnectorPort with shared functionality.
 
     Provides shared implementation for connection management,
     pagination, error handling, and common operations.
+
+    Concrete connectors (Basalam, Shopify, WooCommerce) should extend
+    this class and implement the remaining abstract methods from
+    ShopConnectorPort.
     """
 
     PLATFORM_CODE: str = ""
@@ -105,7 +110,6 @@ class BaseShopConnector(ABC):
     def __init__(self, credentials: Optional[Dict[str, Any]] = None):
         self._credentials = credentials
         self._connected = False
-        self._connection_result: Optional[ConnectionResult] = None
         self._request_timeout = 30.0
         self._max_retries = 3
 
@@ -117,17 +121,13 @@ class BaseShopConnector(ABC):
     def is_connected(self) -> bool:
         return self._connected
 
-    @property
-    def connection_result(self) -> Optional[ConnectionResult]:
-        return self._connection_result
-
     async def _ensure_connected(self) -> None:
         if not self._connected:
             raise ConnectionError("Not connected to shop")
 
     async def _handle_request_error(self, error: Exception, context: str) -> None:
         """Handle and log request errors."""
-        logger.error(f"Error in {context}: {error}")
+        logger.error("request_error", context=context, error=str(error))
         raise
 
     async def list_products_paginated(
@@ -147,7 +147,7 @@ class BaseShopConnector(ABC):
         Returns:
             Dict with products and pagination info
         """
-        products = await self.get_products()
+        products = await self.fetch_products(page=page, limit=per_page)
         if status:
             products = [p for p in products if p.status == status]
 
@@ -165,11 +165,6 @@ class BaseShopConnector(ABC):
             },
         }
 
-    async def get_product_variants(self, product_id: str) -> List[ProductVariant]:
-        """Get variants for a specific product."""
-        product = await self.get_product(product_id)
-        return product.variants
-
     async def create_order_items(self, items: List[Dict[str, Any]]) -> List[OrderItem]:
         """Convert raw items to OrderItem objects."""
         result = []
@@ -186,74 +181,3 @@ class BaseShopConnector(ABC):
                 )
             )
         return result
-
-
-class ShopConnector(ABC):
-    """Abstract shop connector interface."""
-
-    PLATFORM_CODE: str = ""
-
-    def __init__(self, credentials: Optional[Dict[str, Any]] = None):
-        self._credentials = credentials
-        self._connected = False
-        self._connection_result: Optional[ConnectionResult] = None
-
-    @property
-    def platform_code(self) -> str:
-        return self.PLATFORM_CODE
-
-    @property
-    def is_connected(self) -> bool:
-        return self._connected
-
-    @property
-    def connection_result(self) -> Optional[ConnectionResult]:
-        return self._connection_result
-
-    @abstractmethod
-    async def connect(self, credentials: Dict[str, Any]) -> ConnectionResult:
-        pass
-
-    @abstractmethod
-    async def disconnect(self) -> bool:
-        pass
-
-    @abstractmethod
-    async def test_connection(self) -> bool:
-        pass
-
-    @abstractmethod
-    async def get_products(self) -> List[Product]:
-        pass
-
-    @abstractmethod
-    async def get_product(self, product_id: str) -> Product:
-        pass
-
-    @abstractmethod
-    async def get_inventory(self, variant_id: str) -> Inventory:
-        pass
-
-    @abstractmethod
-    async def update_inventory(self, variant_id: str, quantity: int) -> Inventory:
-        pass
-
-    @abstractmethod
-    async def get_orders(self) -> List[Order]:
-        pass
-
-    @abstractmethod
-    async def get_order(self, order_id: str) -> Order:
-        pass
-
-    @abstractmethod
-    async def register_webhook(self, url: str, events: List[str]) -> str:
-        pass
-
-    @abstractmethod
-    async def delete_webhook(self, webhook_id: str) -> bool:
-        pass
-
-    async def _ensure_connected(self) -> None:
-        if not self._connected:
-            raise ConnectionError("Not connected to shop")

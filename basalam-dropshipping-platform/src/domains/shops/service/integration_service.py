@@ -8,7 +8,7 @@ Includes automatic webhook registration on connect and cleanup on disconnect.
 
 import asyncio
 import json
-import logging
+import structlog
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from urllib.parse import quote
@@ -24,7 +24,7 @@ from ..repository import (
 from ..models import Shop, ShopIntegration, Platform
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 # Webhook events to subscribe per platform (Basalam uses numeric event_ids)
@@ -153,12 +153,13 @@ class IntegrationService:
                     integration.id, update_data
                 )
                 logger.info(
-                    f"Successfully registered webhooks for integration {integration.id}"
+                    "webhooks_registered",
+                    integration_id=str(integration.id),
                 )
 
             except Exception as e:
                 # Webhook registration failed — UnitOfWork will roll back the integration creation
-                logger.error(f"Webhook registration failed: {e}")
+                logger.error("webhook_registration_failed", error=str(e))
                 raise WebhookRegistrationError(
                     f"Failed to register webhooks with {platform_code}: {str(e)}"
                 ) from e
@@ -218,16 +219,17 @@ class IntegrationService:
             )
 
         # Non-Basalam platforms (Shopify, WooCommerce) — delegate to connector
-        from src.integrations.shop.connector import get_connector, ShopConnector
+        from src.integrations.shop.registry import get_connector
+        from src.integrations.shop.ports import ShopConnectorPort
 
-        connector: ShopConnector = get_connector(
+        connector: ShopConnectorPort = get_connector(
             platform.code,
             {"credentials": integration.credentials_encrypted},
             vendor_id=integration.external_shop_id,
         )
 
         try:
-            webhook_id = await connector.register_webhook(webhook_url, events)
+            success = await connector.register_webhook(webhook_url, events)
 
             await self._integration_repository.update(
                 integration.id,
@@ -235,20 +237,25 @@ class IntegrationService:
             )
 
             logger.info(
-                f"Registered webhook {webhook_id} for integration {integration.id} "
-                f"with events: {events}"
+                "webhook_registered_with_events",
+                integration_id=str(integration.id),
+                events=events,
+                success=success,
             )
 
             return {
-                "webhook_id": webhook_id,
+                "webhook_id": str(integration.id),  # fallback ID when platform doesn't return one
                 "webhook_url": webhook_url,
                 "events": events,
+                "success": success,
             }
 
         except Exception as e:
             logger.error(
-                f"Failed to register webhook with {platform.code}: {e}",
-                extra={"integration_id": str(integration.id)},
+                "webhook_registration_platform_failed",
+                platform=platform.code,
+                error=str(e),
+                integration_id=str(integration.id),
             )
             raise
 
@@ -310,8 +317,10 @@ class IntegrationService:
             )
 
             logger.info(
-                f"Registered Basalam webhook {webhook_id} for integration "
-                f"{integration.id} with event_ids: {events}, subscribed vendor"
+                "basalam_webhook_registered",
+                webhook_id=webhook_id,
+                integration_id=str(integration.id),
+                events=events,
             )
 
             return {
@@ -322,8 +331,9 @@ class IntegrationService:
 
         except Exception as e:
             logger.error(
-                f"Failed to register Basalam webhook for integration "
-                f"{integration.id}: {e}",
+                "basalam_webhook_registration_failed",
+                integration_id=str(integration.id),
+                error=str(e),
                 exc_info=True,
             )
             raise
@@ -368,7 +378,9 @@ class IntegrationService:
                 webhook_status = "inactive"
             except Exception as e:
                 logger.warning(
-                    f"Failed to unregister webhooks for integration {integration.id}: {e}"
+                    "webhook_unregister_failed",
+                    integration_id=str(integration.id),
+                    error=str(e),
                 )
                 webhook_status = "cleanup_failed"
         else:
@@ -400,10 +412,10 @@ class IntegrationService:
         Raises:
             Exception: If unregistration fails
         """
-        from src.integrations.shop.connector import get_connector
+        from src.integrations.shop.registry import get_connector
 
         if not integration.webhook_id:
-            logger.info(f"No webhook to unregister for integration {integration.id}")
+            logger.info("no_webhook_to_unregister", integration_id=str(integration.id))
             return True
 
         # Get platform
@@ -422,7 +434,9 @@ class IntegrationService:
         await connector.unregister_webhook(integration.webhook_id)
 
         logger.info(
-            f"Unregistered webhook {integration.webhook_id} for integration {integration.id}"
+            "webhook_unregistered",
+            webhook_id=integration.webhook_id,
+            integration_id=str(integration.id),
         )
         return True
 
@@ -496,7 +510,8 @@ class IntegrationService:
 
         if not lock_acquired:
             logger.info(
-                f"Token refresh already in progress for integration {integration.id}"
+                "token_refresh_already_in_progress",
+                integration_id=str(integration.id),
             )
             # Wait briefly and return current state
             await asyncio.sleep(2)
@@ -530,7 +545,9 @@ class IntegrationService:
                 )
             except Exception as e:
                 logger.error(
-                    f"Token refresh failed for integration {integration.id}: {e}"
+                    "token_refresh_failed",
+                    integration_id=str(integration.id),
+                    error=str(e),
                 )
                 # If refresh fails with auth error, mark as disconnected
                 await self._integration_repository.update(
@@ -564,7 +581,7 @@ class IntegrationService:
                 },
             )
 
-            logger.info(f"Successfully refreshed token for integration {integration.id}")
+            logger.info("token_refreshed", integration_id=str(integration.id))
             return integration
 
         finally:
@@ -671,8 +688,10 @@ class IntegrationService:
         integration = await self._integration_repository.create(integration_data)
 
         logger.info(
-            f"Started OAuth flow for shop {shop_id}, platform {platform_code}, "
-            f"integration {integration.id}"
+            "oauth_flow_started",
+            shop_id=str(shop_id),
+            platform_code=platform_code,
+            integration_id=str(integration.id),
         )
 
         return {
@@ -753,7 +772,7 @@ class IntegrationService:
         try:
             token_data = await client.exchange_authorization_code(code, redirect_uri)
         except Exception as e:
-            logger.error(f"Token exchange failed for integration {integration.id}: {e}")
+            logger.error("token_exchange_failed", integration_id=str(integration.id), error=str(e))
             raise ValueError(
                 f"Failed to exchange authorization code with Basalam: {e}"
             )
@@ -765,7 +784,7 @@ class IntegrationService:
         try:
             user_data = await client.get_current_user(access_token)
         except Exception as e:
-            logger.error(f"Failed to fetch user info for integration {integration.id}: {e}")
+            logger.error("user_info_fetch_failed", integration_id=str(integration.id), error=str(e))
             raise ValueError(f"Failed to fetch user info from Basalam: {e}")
 
         vendor_info = user_data.get("vendor")
@@ -794,8 +813,9 @@ class IntegrationService:
         )
 
         logger.info(
-            f"Successfully connected Basalam vendor {vendor_id} "
-            f"for integration {integration.id}"
+            "basalam_vendor_connected",
+            vendor_id=vendor_id,
+            integration_id=str(integration.id),
         )
 
         await client.close()
@@ -821,7 +841,7 @@ class IntegrationService:
             ValueError: If integration not found or not active
         """
         from src.domains.shops.service.webhook_secret_service import get_webhook_secret_service
-        from src.integrations.shop.connector import get_connector
+        from src.integrations.shop.registry import get_connector
         from src.core.config import get_settings
 
         integration = await self._integration_repository.get_by_id(integration_id)
@@ -877,8 +897,9 @@ class IntegrationService:
             )
 
             logger.info(
-                f"Rotated webhook secret for integration {integration.id}. "
-                f"Previous secret expires at {old_secret_expires_at}"
+                "webhook_secret_rotated",
+                integration_id=str(integration.id),
+                previous_secret_expires_at=str(old_secret_expires_at),
             )
 
             return {
@@ -890,7 +911,9 @@ class IntegrationService:
 
         except Exception as e:
             logger.error(
-                f"Failed to rotate webhook secret for integration {integration.id}: {e}"
+                "webhook_secret_rotation_failed",
+                integration_id=str(integration.id),
+                error=str(e),
             )
             raise WebhookRegistrationError(
                 f"Failed to update platform with new secret: {str(e)}"

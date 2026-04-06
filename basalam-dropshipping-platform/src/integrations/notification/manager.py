@@ -5,7 +5,6 @@ Manages all notification adapters and provides unified interface
 
 This is the PORT IMPLEMENTATION that ties all adapters together.
 """
-from datetime import datetime
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
@@ -202,5 +201,59 @@ def create_notification_manager(config: Dict[str, Any]) -> NotificationManager:
         "body": "{product_name} inventory is low ({quantity} remaining)",
         "action_url": "/products/{product_id}"
     })
-    
+
+    manager.register_template("order_cancelled", {
+        "title": "Order Cancelled #{order_id}",
+        "body": "Order #{order_id} has been cancelled. Reason: {reason}",
+        "action_url": "/orders/{order_id}"
+    })
+
+    manager.register_template("dispute_opened", {
+        "title": "Dispute Opened #{dispute_id}",
+        "body": "A dispute has been opened for order #{order_id}. Issue: {reason}",
+        "action_url": "/disputes/{dispute_id}"
+    })
+
+    manager.register_template("dispute_resolved", {
+        "title": "Dispute Resolved #{dispute_id}",
+        "body": "Dispute #{dispute_id} for order #{order_id} has been resolved. Outcome: {resolution}",
+        "action_url": "/disputes/{dispute_id}"
+    })
+
+    manager.register_template("supplier_payout", {
+        "title": "Payout Processed",
+        "body": "A payout of {amount} has been processed for your account.",
+        "action_url": "/payouts/{payout_id}"
+    })
+
+    manager.register_template("refund_processed", {
+        "title": "Refund Processed",
+        "body": "Refund of {amount} for order #{order_id} has been processed.",
+        "action_url": "/orders/{order_id}"
+    })
+
+    manager.register_template("fraud_alert", {
+        "title": "Fraud Alert #{order_id}",
+        "body": "Suspicious activity detected on order #{order_id}. Reason: {reason}",
+        "action_url": "/orders/{order_id}"
+    })
+
+    manager.register_template("product_forbidden", {
+        "title": "Product Forbidden",
+        "body": "Product '{product_name}' has been flagged as forbidden. Reason: {reason}",
+        "action_url": "/products/{product_id}"
+    })
+
+    manager.register_template("sync_completed", {
+        "title": "Sync Completed",
+        "body": "Synchronization completed for shop '{shop_name}'. {synced_count} items processed.",
+        "action_url": "/shops/{shop_id}/sync"
+    })
+
+    manager.register_template("price_updated", {
+        "title": "Price Updated",
+        "body": "Price for '{product_name}' has been updated from {old_price} to {new_price}.",
+        "action_url": "/products/{product_id}"
+    })
+
     return manager

@@ -1,5 +1,5 @@
 import json
-import logging
+import structlog
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from uuid import UUID
@@ -9,7 +9,7 @@ from sqlalchemy import insert
 
 from .base import DomainEvent
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class TopicRouter:
@@ -182,9 +182,9 @@ class EventPublisher:
                     offset=result["offset"],
                 )
             except Exception as e:
-                logger.warning(f"Failed to save event to event store: {e}")
+                logger.warning("failed_to_save_event_to_store", error=str(e))
 
-        logger.debug(f"Published event {event.event_id} to {topic}")
+        logger.debug("published_event", event_id=str(event.event_id), topic=topic)
         return result
 
     async def publish_batch(

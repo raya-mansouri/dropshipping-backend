@@ -10,7 +10,7 @@ import httpx
 import hmac
 import hashlib
 import json
-import logging
+import structlog
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from uuid import UUID
@@ -27,7 +27,7 @@ from src.core.webhook_metrics import (
 )
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 # Retry intervals: 1m, 5m, 15m, 1h, 6h
@@ -289,11 +289,11 @@ class WebhookNotificationAdapter(NotificationPort):
             self.db_session.add(log)
             await self.db_session.commit()
 
-            logger.debug(f"Created outgoing webhook log {log.id}")
+            logger.debug("created_outgoing_webhook_log", log_id=str(log.id))
             return str(log.id)
 
         except Exception as e:
-            logger.error(f"Failed to create webhook log: {e}")
+            logger.error("failed_to_create_webhook_log", error=str(e))
             return None
 
     async def _update_webhook_log(
@@ -320,7 +320,7 @@ class WebhookNotificationAdapter(NotificationPort):
             await self.db_session.commit()
 
         except Exception as e:
-            logger.error(f"Failed to update webhook log {log_id}: {e}")
+            logger.error("failed_to_update_webhook_log", log_id=str(log_id), error=str(e))
 
     async def _schedule_retry(
         self,
@@ -367,12 +367,15 @@ class WebhookNotificationAdapter(NotificationPort):
                 await self.db_session.commit()
 
                 logger.info(
-                    f"Scheduled retry {new_retry_count}/{MAX_RETRIES} for webhook {log_id} "
-                    f"at {next_retry_at}"
+                    "scheduled_webhook_retry",
+                    log_id=str(log_id),
+                    retry_count=new_retry_count,
+                    max_retries=MAX_RETRIES,
+                    next_retry_at=next_retry_at.isoformat(),
                 )
 
         except Exception as e:
-            logger.error(f"Failed to schedule retry for webhook {log_id}: {e}")
+            logger.error("failed_to_schedule_webhook_retry", log_id=str(log_id), error=str(e))
 
     async def _move_to_dlq(
         self,
@@ -413,7 +416,7 @@ class WebhookNotificationAdapter(NotificationPort):
 
             await self.db_session.commit()
 
-            logger.warning(f"Moved webhook {log_id} to dead letter queue")
+            logger.warning("moved_webhook_to_dlq", log_id=str(log_id))
 
         except Exception as e:
-            logger.error(f"Failed to move webhook {log_id} to DLQ: {e}")
+            logger.error("failed_to_move_webhook_to_dlq", log_id=str(log_id), error=str(e))

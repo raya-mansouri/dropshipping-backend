@@ -5,16 +5,16 @@ Base webhook processor with signature verification and event data extraction.
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
 import hashlib
 import hmac
-import logging
+import structlog
 
 from pydantic import BaseModel
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class WebhookEvent(BaseModel):
@@ -118,19 +118,21 @@ class WebhookProcessor(ABC):
             logger.warning("No timestamp found in webhook payload or headers")
             return False
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if isinstance(timestamp, str):
             try:
                 timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             except ValueError:
-                logger.warning(f"Invalid timestamp format: {timestamp}")
+                logger.warning("invalid_timestamp_format", timestamp=str(timestamp))
                 return False
 
         age_seconds = abs((now - timestamp.replace(tzinfo=None)).total_seconds())
 
         if age_seconds > max_age:
             logger.warning(
-                f"Webhook timestamp too old: {age_seconds:.1f}s (max: {max_age}s)"
+                "webhook_timestamp_too_old",
+                age_seconds=round(age_seconds, 1),
+                max_age=max_age,
             )
             return False
 
@@ -260,8 +262,9 @@ class WebhookProcessorRegistry:
             resolved = self.BASALAM_EVENT_MAP.get(event_id)
             if resolved is None:
                 logger.warning(
-                    f"Unknown Basalam event_id: {event_id}, "
-                    f"known: {list(self.BASALAM_EVENT_MAP.keys())}"
+                    "unknown_basalam_event_id",
+                    event_id=event_id,
+                    known_event_ids=list(self.BASALAM_EVENT_MAP.keys()),
                 )
                 return None
 

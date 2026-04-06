@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from uuid import UUID
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 from src.core.validators.phone import validate_iranian_phone
 

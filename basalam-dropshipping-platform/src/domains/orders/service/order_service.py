@@ -12,6 +12,7 @@ Handles:
 - Order splitting by supplier
 """
 
+import structlog
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -19,19 +20,21 @@ from uuid import UUID, uuid4
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from ..models import Order, OrderItem, OrderStatus, OrderHistory
 from ..repository import OrderRepository, OrderItemRepository
 from ...inventory.service.reservation_service import ReservationService
 from ...inventory.repository import InventoryReservationRepository
+from src.core.events.base import DomainEvent
+from src.core.events.publisher import EventPublisher
 from src.core.events.order import (
     OrderCreated,
-    OrderPaid,
     OrderCancelled,
     OrderStatusChanged,
-    OrderShipped,
 )
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -128,8 +131,13 @@ class OrderService:
     - Price snapshots at order time
     """
 
-    def __init__(self, session: AsyncSession):
+    def __init__(
+        self,
+        session: AsyncSession,
+        event_publisher: Optional[EventPublisher] = None,
+    ):
         self.session = session
+        self._event_publisher = event_publisher
         self._order_repo = OrderRepository(session)
         self._order_item_repo = OrderItemRepository(session)
         self._reservation_service = ReservationService(session)
@@ -138,6 +146,15 @@ class OrderService:
     def _can_transition(self, from_status: OrderStatus, to_status: OrderStatus) -> bool:
         """Check if a state transition is valid"""
         return to_status in VALID_TRANSITIONS.get(from_status, [])
+
+    async def _publish_event(self, event: DomainEvent) -> None:
+        """Safely publish domain event. Non-blocking - failures are logged but don't raise."""
+        if self._event_publisher is None:
+            return
+        try:
+            await self._event_publisher.publish(topic="events", event=event)
+        except Exception as e:
+            logger.warning("failed_to_publish_event", event_type=event.event_type, error=str(e))
 
     async def _record_history(
         self,
@@ -204,7 +221,6 @@ class OrderService:
             SupplierVariant,
             SellerVariant,
             SellerListing,
-            Category,
         )
         from ...products.models import SupplierProduct
 
@@ -336,6 +352,7 @@ class OrderService:
             total_price=float(total_price),
             items_count=len(order_items),
         )
+        await self._publish_event(event)
 
         return order
 
@@ -415,6 +432,7 @@ class OrderService:
             actor=actor_type,
             metadata={"reason": reason} if reason else {},
         )
+        await self._publish_event(status_event)
 
         return updated_order
 
@@ -472,6 +490,7 @@ class OrderService:
             reason=reason,
             refunded_amount=float(order.total_price),
         )
+        await self._publish_event(cancel_event)
 
         return cancelled_order
 

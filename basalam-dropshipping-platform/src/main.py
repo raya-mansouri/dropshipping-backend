@@ -5,7 +5,7 @@ Main FastAPI application with all routers.
 Runs Alembic migrations on startup via asyncio.to_thread.
 """
 import asyncio
-import logging
+import structlog
 import traceback
 from contextlib import asynccontextmanager
 
@@ -19,15 +19,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from src.api.v1 import auth, orders, products, shops, health
-from src.api.v1 import webhooks, webhook_health
+from src.api.v1 import webhooks, webhook_health, admin
 from src.core.config import get_settings
+from src.core.events.publisher import EventPublisher
+from src.core.logging import configure_logging
+from src.core.middleware import CorrelationIdMiddleware
 
-# Configure basic logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+configure_logging()
+logger = structlog.get_logger(__name__)
 
+settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -37,13 +38,22 @@ async def lifespan(app: FastAPI):
     alembic_cfg = Config("alembic.ini")
     await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
 
+    # Initialize EventPublisher
+    event_publisher = EventPublisher(
+        kafka_bootstrap_servers=settings.kafka_bootstrap_servers,
+    )
+    app.state.event_publisher = event_publisher
+
     logger.info("application_ready")
     yield
+
+    # Cleanup
+    await event_publisher.close()
     logger.info("application_shutting_down")
 
 
 # Check if we should serve docs offline (no CDN)
-DOCS_OFFLINE = get_settings().docs_offline
+DOCS_OFFLINE = settings.docs_offline
 
 app = FastAPI(
     title="Basalam Dropshipping Platform API",
@@ -54,12 +64,17 @@ app = FastAPI(
     redoc_url=None if DOCS_OFFLINE else "/redoc",
 )
 
+app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=get_settings().cors_origins.split(","),
+    allow_origins=(
+        [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+        if settings.app_env == "production"
+        else ["http://localhost:3000", "http://localhost:8080"]
+    ),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "Content-Type", "X-Correlation-ID"],
 )
 
 # Mount static files for Swagger UI
@@ -93,6 +108,7 @@ app.include_router(shops.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")
 app.include_router(webhook_health.router, prefix="/api/v1")
+app.include_router(admin.router, prefix="/api/v1")
 
 
 # ============================================
@@ -104,7 +120,7 @@ app.include_router(webhook_health.router, prefix="/api/v1")
 async def validation_exception_handler(request: Request, exc: ValidationError):
     """Handle Pydantic validation errors"""
     errors = exc.errors()
-    logger.error(f"Validation error: {errors}")
+    logger.error("validation_error", errors=errors)
     return JSONResponse(
         status_code=422, content={"detail": "Validation error", "errors": errors}
     )
@@ -113,7 +129,7 @@ async def validation_exception_handler(request: Request, exc: ValidationError):
 @app.exception_handler(ValueError)
 async def value_error_exception_handler(request: Request, exc: ValueError):
     """Handle ValueError exceptions"""
-    logger.error(f"ValueError: {str(exc)}")
+    logger.error("value_error", error=str(exc))
     return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 
@@ -131,8 +147,10 @@ async def general_exception_handler(request: Request, exc: Exception):
 
     # Always log the full error
     logger.error(
-        f"Unhandled exception: {type(exc).__name__}: {str(exc)}\n"
-        f"Full traceback:\n{traceback.format_exc()}"
+        "unhandled_exception",
+        exc_type=type(exc).__name__,
+        exc_message=str(exc),
+        traceback=traceback.format_exc(),
     )
 
     # Return different responses based on environment

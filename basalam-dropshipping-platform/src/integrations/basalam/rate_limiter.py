@@ -1,11 +1,11 @@
 import asyncio
-import logging
+import structlog
 import time
 from typing import Optional, Dict
 
 import redis.asyncio as redis
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # Atomic token bucket Lua script
 # Returns: [remaining_tokens, limit, period_ttl] or [-1, 0, 0] on rate exceeded
@@ -142,8 +142,10 @@ class RateLimiter:
                         endpoint, rate=parsed_limit, period=parsed_reset
                     )
                     logger.debug(
-                        f"Updated rate limits for {endpoint}: "
-                        f"{parsed_limit}/{parsed_reset}s from API headers"
+                        "rate_limits_updated",
+                        endpoint=endpoint,
+                        limit=parsed_limit,
+                        reset=parsed_reset,
                     )
             except (ValueError, TypeError):
                 pass

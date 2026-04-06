@@ -12,7 +12,7 @@ Webhook signature is in X-Basalam-Signature header.
 """
 
 from typing import Dict, Any
-import logging
+import structlog
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +21,7 @@ from .base import WebhookProcessor
 from src.core.repository.unit_of_work import UnitOfWork
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class ProductWebhookProcessor(WebhookProcessor):
@@ -63,8 +63,9 @@ class ProductWebhookProcessor(WebhookProcessor):
 
         if event_id != self.EVENT_PRODUCT_CHANGES:
             logger.warning(
-                f"Unexpected event_id: {event_id}, "
-                f"expected {self.EVENT_PRODUCT_CHANGES}"
+                "unexpected_event_id",
+                event_id=str(event_id),
+                expected=str(self.EVENT_PRODUCT_CHANGES),
             )
             return False
 
@@ -80,13 +81,13 @@ class ProductWebhookProcessor(WebhookProcessor):
                 existing = await self._find_product(str(product_id))
                 if existing:
                     await self._update_product(str(product_id), event_data)
-                    logger.info(f"Updated product from webhook: {product_id}")
+                    logger.info("updated_product_from_webhook", product_id=str(product_id))
                 else:
                     await self._create_product(str(product_id), event_data)
-                    logger.info(f"Created product from webhook: {product_id}")
+                    logger.info("created_product_from_webhook", product_id=str(product_id))
             return True
         except Exception as e:
-            logger.error(f"Failed to process product webhook: {e}")
+            logger.error("failed_to_process_product_webhook", error=str(e))
             return False
 
     async def _find_product(self, external_product_id: str):
@@ -135,7 +136,7 @@ class ProductWebhookProcessor(WebhookProcessor):
             product.status = status
             product.raw_payload = data
         else:
-            logger.warning(f"Product not found for update: {product_id}")
+            logger.warning("product_not_found_for_update", product_id=str(product_id))
             await self._create_product(product_id, data)
 
     @staticmethod

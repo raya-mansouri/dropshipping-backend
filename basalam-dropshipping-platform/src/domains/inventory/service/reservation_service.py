@@ -5,7 +5,7 @@ Business logic for inventory reservations with deadlock detection and partial re
 """
 
 import asyncio
-import logging
+import structlog
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -20,8 +20,15 @@ from ..repository import (
     InventoryReservationRepository,
     InventoryLogRepository,
 )
+from src.core.events.publisher import EventPublisher
+from src.core.events.base import DomainEvent
+from src.core.events.inventory import (
+    InventoryReserved,
+    InventoryReleased,
+    InventoryUpdated,
+)
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -95,8 +102,9 @@ class DeadlockDetector:
                 if DeadlockDetector.is_deadlock_error(exc):
                     last_exception = exc
                     logger.warning(
-                        f"Deadlock detected on attempt {attempt + 1}/{max_retries}. "
-                        f"Retrying..."
+                        "deadlock_detected_retrying",
+                        attempt=attempt + 1,
+                        max_retries=max_retries,
                     )
                     await asyncio.sleep(0.1 * (attempt + 1))
                     continue
@@ -115,17 +123,32 @@ class ReservationService:
 
     DEFAULT_RESERVATION_MINUTES = 30
 
-    def __init__(self, session: AsyncSession):
+    def __init__(
+        self,
+        session: AsyncSession,
+        event_publisher: Optional[EventPublisher] = None,
+    ):
         """
         Initialize service with database session.
 
         Args:
             session: Async SQLAlchemy session for database operations
+            event_publisher: Optional EventPublisher for domain events
         """
         self.session = session
+        self._event_publisher = event_publisher
         self._inventory_repo = InventoryRepository(session)
         self._reservation_repo = InventoryReservationRepository(session)
         self._log_repo = InventoryLogRepository(session)
+
+    async def _publish_event(self, event: DomainEvent) -> None:
+        """Safely publish domain event. Non-blocking - failures are logged but don't raise."""
+        if self._event_publisher is None:
+            return
+        try:
+            await self._event_publisher.publish(topic="events", event=event)
+        except Exception as e:
+            logger.warning("failed_to_publish_event", event_type=event.event_type, error=str(e))
 
     async def reserve_inventory(
         self,
@@ -203,6 +226,15 @@ class ReservationService:
                 "reason": f"Reserved {quantity} for order item",
                 "metadata": {"reservation_id": str(reservation.id)},
             }
+        )
+
+        await self._publish_event(
+            InventoryReserved(
+                variant_id=variant_id,
+                order_item_id=order_item_id,
+                quantity=quantity,
+                expires_at=expires_at,
+            )
         )
 
         return Reservation.from_model(reservation)
@@ -396,6 +428,15 @@ class ReservationService:
                 }
             )
 
+            await self._publish_event(
+                InventoryReleased(
+                    variant_id=reservation.variant_id,
+                    order_item_id=order_item_id,
+                    quantity=reservation.quantity,
+                    reason=reason,
+                )
+            )
+
         return True
 
     async def consume_inventory(self, order_item_id: uuid.UUID) -> bool:
@@ -445,6 +486,15 @@ class ReservationService:
                     "reason": "Inventory consumed for order",
                     "metadata": {"reservation_id": str(reservation.id)},
                 }
+            )
+
+            await self._publish_event(
+                InventoryUpdated(
+                    variant_id=reservation.variant_id,
+                    old_quantity=old_inventory,
+                    new_quantity=old_inventory - reservation.quantity,
+                    source="order_consumed",
+                )
             )
 
         return True

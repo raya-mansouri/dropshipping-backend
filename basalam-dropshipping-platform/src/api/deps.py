@@ -8,16 +8,18 @@ from typing import Optional, AsyncGenerator
 from uuid import UUID
 
 import redis.asyncio as redis
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from src.core.config import get_settings
 from src.core.database import async_session_maker
+from src.core.events.publisher import EventPublisher
 from src.domains.accounts.models import User
 from src.domains.accounts.repository.account import AccountRepository
 from src.domains.shops.repository.shop import ShopRepository
+from src.domains.audit_logs.service import AuditLogService
 
 
 SECRET_KEY = get_settings().secret_key.get_secret_value()
@@ -126,6 +128,16 @@ def require_role(*roles: str):
 require_admin = require_role("admin")
 
 
+# ---- AuditLog Dependency ----
+
+
+async def get_audit_service(
+    db: AsyncSession = Depends(get_db),
+) -> AuditLogService:
+    """Dependency to get an AuditLogService instance."""
+    return AuditLogService(db)
+
+
 # ---- Ownership Dependencies ----
 
 
@@ -156,3 +168,8 @@ async def verify_shop_ownership(
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
     return shop
+
+
+async def get_event_publisher(request: Request) -> EventPublisher:
+    """Get the app-level EventPublisher instance."""
+    return request.app.state.event_publisher

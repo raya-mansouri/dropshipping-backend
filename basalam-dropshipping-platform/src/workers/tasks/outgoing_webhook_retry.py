@@ -3,8 +3,8 @@ Outgoing Webhook Retry Task
 ============================
 Celery task for processing outgoing webhook retries with exponential backoff.
 """
-import logging
-from datetime import datetime, timedelta
+import structlog
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
@@ -21,7 +21,7 @@ from src.domains.webhooks.models import (
 )
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # Retry intervals in seconds: 1m, 5m, 15m, 1h, 6h
 RETRY_INTERVALS = [60, 300, 900, 3600, 21600]
@@ -62,20 +62,22 @@ async def _process_webhook_retry_async(webhook_log_id: str) -> dict:
             webhook_log = result.scalar_one_or_none()
 
             if not webhook_log:
-                logger.error(f"Webhook log {webhook_log_id} not found")
+                logger.error("webhook_log_not_found", webhook_log_id=str(webhook_log_id))
                 return {"status": "error", "error": "not_found"}
 
             # Check if already processed
             if webhook_log.status == OutgoingWebhookStatus.SENT.value:
-                logger.info(f"Webhook {webhook_log_id} already sent")
+                logger.info("webhook_already_sent", webhook_log_id=str(webhook_log_id))
                 return {"status": "already_sent"}
 
             # Get retry count
             retry_count = webhook_log.retry_count or 0
 
             logger.info(
-                f"Processing webhook retry {retry_count + 1}/{MAX_RETRIES} "
-                f"for log {webhook_log_id}"
+                "processing_webhook_retry",
+                retry_count=str(retry_count + 1),
+                max_retries=str(MAX_RETRIES),
+                webhook_log_id=str(webhook_log_id),
             )
 
             # Attempt to send
@@ -91,7 +93,7 @@ async def _process_webhook_retry_async(webhook_log_id: str) -> dict:
                     .where(OutgoingWebhookLog.id == webhook_log_id)
                     .values(
                         status=OutgoingWebhookStatus.SENT.value,
-                        last_attempt_at=datetime.utcnow(),
+                        last_attempt_at=datetime.now(timezone.utc),
                         response_status_code=status_code,
                         last_error=None,
                     )
@@ -99,7 +101,7 @@ async def _process_webhook_retry_async(webhook_log_id: str) -> dict:
                 await session.execute(stmt)
                 await session.commit()
 
-                logger.info(f"Webhook {webhook_log_id} sent successfully")
+                logger.info("webhook_sent_successfully", webhook_log_id=str(webhook_log_id))
                 return {"status": "sent"}
 
             # Failed - check if we should retry
@@ -123,7 +125,7 @@ async def _process_webhook_retry_async(webhook_log_id: str) -> dict:
 
             # Schedule next retry
             next_retry_count = retry_count + 1
-            next_retry_at = datetime.utcnow() + timedelta(
+            next_retry_at = datetime.now(timezone.utc) + timedelta(
                 seconds=RETRY_INTERVALS[min(next_retry_count, len(RETRY_INTERVALS) - 1)]
             )
 
@@ -133,7 +135,7 @@ async def _process_webhook_retry_async(webhook_log_id: str) -> dict:
                 .values(
                     status=OutgoingWebhookStatus.RETRYING.value,
                     retry_count=next_retry_count,
-                    last_attempt_at=datetime.utcnow(),
+                    last_attempt_at=datetime.now(timezone.utc),
                     next_retry_at=next_retry_at,
                     last_error=error[:500] if error else None,
                     response_status_code=status_code,
@@ -143,8 +145,11 @@ async def _process_webhook_retry_async(webhook_log_id: str) -> dict:
             await session.commit()
 
             logger.info(
-                f"Scheduled retry {next_retry_count}/{MAX_RETRIES} "
-                f"for webhook {webhook_log_id} at {next_retry_at}"
+                "scheduled_webhook_retry",
+                retry_count=str(next_retry_count),
+                max_retries=str(MAX_RETRIES),
+                webhook_log_id=str(webhook_log_id),
+                next_retry_at=str(next_retry_at),
             )
 
             return {
@@ -154,7 +159,7 @@ async def _process_webhook_retry_async(webhook_log_id: str) -> dict:
             }
 
         except Exception as e:
-            logger.error(f"Error processing webhook retry {webhook_log_id}: {e}")
+            logger.error("error_processing_webhook_retry", webhook_log_id=str(webhook_log_id), error=str(e))
             return {"status": "error", "error": str(e)}
 
 
@@ -201,7 +206,7 @@ async def _move_to_dlq(
         .where(OutgoingWebhookLog.id == webhook_log.id)
         .values(
             status=OutgoingWebhookStatus.FAILED.value,
-            last_attempt_at=datetime.utcnow(),
+            last_attempt_at=datetime.now(timezone.utc),
             last_error=failure_reason[:500] if failure_reason else None,
         )
     )
@@ -218,7 +223,7 @@ async def _move_to_dlq(
 
     await session.commit()
 
-    logger.warning(f"Moved webhook {webhook_log.id} to dead letter queue")
+    logger.warning("moved_webhook_to_dlq", webhook_log_id=str(webhook_log.id))
 
 
 @shared_task
@@ -235,7 +240,7 @@ def process_pending_retries():
 async def _process_pending_retries_async() -> dict:
     """Async implementation of pending retries processing."""
     async with async_session_maker() as session:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Find webhooks that need retry
         stmt = select(OutgoingWebhookLog.id).where(
@@ -253,7 +258,7 @@ async def _process_pending_retries_async() -> dict:
         for webhook_id in webhook_ids:
             process_webhook_retry.delay(webhook_id)
 
-        logger.info(f"Queued {len(webhook_ids)} webhooks for retry processing")
+        logger.info("queued_webhooks_for_retry", count=str(len(webhook_ids)))
 
         return {"status": "success", "processed": len(webhook_ids)}
 
@@ -274,7 +279,7 @@ async def _cleanup_old_webhook_logs_async() -> dict:
     from sqlalchemy import delete
 
     async with async_session_maker() as session:
-        cutoff = datetime.utcnow() - timedelta(days=30)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
 
         # Delete old sent webhooks
         stmt = delete(OutgoingWebhookLog).where(
@@ -294,7 +299,7 @@ async def _cleanup_old_webhook_logs_async() -> dict:
 
         await session.commit()
 
-        logger.info(f"Cleaned up {sent_deleted} sent webhooks and {dlq_deleted} DLQ entries")
+        logger.info("cleaned_up_webhook_logs", sent_deleted=str(sent_deleted), dlq_deleted=str(dlq_deleted))
 
         return {
             "status": "success",

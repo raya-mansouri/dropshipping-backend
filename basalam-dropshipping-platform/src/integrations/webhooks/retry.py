@@ -3,15 +3,15 @@ Webhook Retry Scheduler
 =======================
 Schedules and manages webhook retry attempts with exponential backoff.
 """
-import logging
-from datetime import datetime, timedelta
+import structlog
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class RetrySchedule:
@@ -53,7 +53,7 @@ class RetryScheduler:
             raise ValueError(f"Attempt must be between 1 and {self.MAX_ATTEMPTS}")
 
         delay_seconds = self.SCHEDULE.intervals[attempt - 1]
-        return datetime.utcnow() + timedelta(seconds=delay_seconds)
+        return datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
 
     async def schedule_retry(
         self,
@@ -77,7 +77,7 @@ class RetryScheduler:
             True if retry was scheduled successfully, False if max retries exceeded
         """
         if attempt >= self.MAX_ATTEMPTS:
-            logger.warning(f"Max retry attempts reached for event {event_id}")
+            logger.warning("max_retry_attempts_reached", event_id=str(event_id))
             await self._mark_as_failed(event_id)
             return False
 
@@ -94,8 +94,11 @@ class RetryScheduler:
                 scheduled_at=next_retry_time,
             )
             logger.info(
-                f"Scheduled retry {next_attempt}/{self.MAX_ATTEMPTS} "
-                f"for event {event_id} at {next_retry_time}"
+                "scheduled_retry",
+                attempt=next_attempt,
+                max_attempts=self.MAX_ATTEMPTS,
+                event_id=str(event_id),
+                scheduled_at=str(next_retry_time),
             )
 
         return True
@@ -158,7 +161,7 @@ class RetryScheduler:
             self.db_session.add(dlq_entry)
             await self.db_session.commit()
 
-            logger.warning(f"Event {event_id} moved to dead letter queue")
+            logger.warning("event_moved_to_dlq", event_id=str(event_id))
 
     async def get_pending_retries(self) -> List[dict]:
         """
@@ -172,7 +175,7 @@ class RetryScheduler:
 
         from src.domains.webhooks.models import WebhookRetrySchedule, WebhookEvent
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         stmt = (
             select(WebhookRetrySchedule, WebhookEvent)
             .join(WebhookEvent, WebhookRetrySchedule.webhook_event_id == WebhookEvent.id)
@@ -203,7 +206,7 @@ class RetryScheduler:
         stmt = (
             update(WebhookRetrySchedule)
             .where(WebhookRetrySchedule.id == retry_id)
-            .values(status="executed", executed_at=datetime.utcnow())
+            .values(status="executed", executed_at=datetime.now(timezone.utc))
         )
         await self.db_session.execute(stmt)
 
@@ -217,7 +220,7 @@ class RetryScheduler:
             event_stmt = (
                 update(WebhookEvent)
                 .where(WebhookEvent.id == retry.webhook_event_id)
-                .values(status="completed", processed_at=datetime.utcnow())
+                .values(status="completed", processed_at=datetime.now(timezone.utc))
             )
             await self.db_session.execute(event_stmt)
 
@@ -230,7 +233,7 @@ class RetryScheduler:
         stmt = (
             update(WebhookRetrySchedule)
             .where(WebhookRetrySchedule.id == retry_id)
-            .values(status="failed", error=error, executed_at=datetime.utcnow())
+            .values(status="failed", error=error, executed_at=datetime.now(timezone.utc))
         )
         await self.db_session.execute(stmt)
         await self.db_session.commit()

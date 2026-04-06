@@ -45,7 +45,7 @@ def configure_logging() -> None:
         processors.append(JSONRenderer(serializer=_format_json))
     else:
         processors.append(
-            structlog.dev.ConsoleRenderer(format_my_extra=True, colors=True)
+            structlog.dev.ConsoleRenderer(colors=True)
         )
 
     structlog.configure(

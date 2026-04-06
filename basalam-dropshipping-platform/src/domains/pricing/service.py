@@ -17,48 +17,10 @@ from uuid import UUID, uuid4
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import Column, String, DateTime, Numeric, ForeignKey, Index
-from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
-from src.core.database import Base
-
-
-class PriceHistory(Base):
-    """
-    Price history tracking
-
-    Records all price changes for audit and analytics
-    """
-
-    __tablename__ = "price_history"
-
-    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
-
-    variant_id = Column(
-        PGUUID(as_uuid=True), ForeignKey("supplier_variants.id"), nullable=False
-    )
-    listing_id = Column(PGUUID(as_uuid=True), ForeignKey("seller_listings.id"))
-
-    old_price = Column(Numeric(12, 2), nullable=False)
-    new_price = Column(Numeric(12, 2), nullable=False)
-    old_supplier_price = Column(Numeric(12, 2))
-    new_supplier_price = Column(Numeric(12, 2))
-
-    margin_percent = Column(Numeric(5, 2))
-    margin_changed = Column(String(20))  # increased, decreased, unchanged
-
-    change_reason = Column(
-        String(50)
-    )  # supplier_price_change, margin_change, manual, sync
-
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-    __table_args__ = (
-        Index("idx_price_history_variant", "variant_id"),
-        Index("idx_price_history_listing", "listing_id"),
-        Index("idx_price_history_created", "created_at"),
-    )
+from .models import PriceHistory
+from ..products.models import Category
+from .repository import PricingRepository
 
 
 @dataclass
@@ -97,8 +59,10 @@ class PricingService:
     - Price history tracking
     """
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, event_publisher=None):
         self.session = session
+        self.event_publisher = event_publisher
+        self.repo = PricingRepository(session)
 
     async def calculate_price(
         self,
@@ -260,22 +224,19 @@ class PricingService:
             else Decimal("0")
         )
 
-        price_history = PriceHistory(
-            id=uuid4(),
-            variant_id=variant_id,
-            listing_id=listing_id,
-            old_price=seller_price,
-            new_price=seller_price,
-            old_supplier_price=supplier_price,
-            new_supplier_price=supplier_price,
-            margin_percent=margin_percent,
-            margin_changed="unchanged",
-            change_reason="order_snapshot",
-            created_at=datetime.utcnow(),
-        )
-
-        self.session.add(price_history)
-        await self.session.flush()
+        price_history = await self.repo.create({
+            "id": uuid4(),
+            "variant_id": variant_id,
+            "listing_id": listing_id,
+            "old_price": seller_price,
+            "new_price": seller_price,
+            "old_supplier_price": supplier_price,
+            "new_supplier_price": supplier_price,
+            "margin_percent": margin_percent,
+            "margin_changed": "unchanged",
+            "change_reason": "order_snapshot",
+            "created_at": datetime.utcnow(),
+        })
 
         return price_history
 
@@ -322,22 +283,19 @@ class PricingService:
         else:
             margin_changed = "unchanged"
 
-        price_history = PriceHistory(
-            id=uuid4(),
-            variant_id=variant_id,
-            listing_id=listing_id,
-            old_price=old_price,
-            new_price=new_price,
-            old_supplier_price=old_supplier_price,
-            new_supplier_price=new_supplier_price,
-            margin_percent=new_margin,
-            margin_changed=margin_changed,
-            change_reason=reason,
-            created_at=datetime.utcnow(),
-        )
-
-        self.session.add(price_history)
-        await self.session.flush()
+        price_history = await self.repo.create({
+            "id": uuid4(),
+            "variant_id": variant_id,
+            "listing_id": listing_id,
+            "old_price": old_price,
+            "new_price": new_price,
+            "old_supplier_price": old_supplier_price,
+            "new_supplier_price": new_supplier_price,
+            "margin_percent": new_margin,
+            "margin_changed": margin_changed,
+            "change_reason": reason,
+            "created_at": datetime.utcnow(),
+        })
 
         return price_history
 
@@ -356,13 +314,7 @@ class PricingService:
         Returns:
             List of PriceHistory records
         """
-        result = await self.session.execute(
-            PriceHistory.__table__.select()
-            .where(PriceHistory.variant_id == variant_id)
-            .order_by(PriceHistory.created_at.desc())
-            .limit(limit)
-        )
-        return result.fetchall()
+        return await self.repo.get_by_variant(variant_id, limit=limit)
 
     async def get_latest_price(
         self,
@@ -377,13 +329,7 @@ class PricingService:
         Returns:
             Most recent PriceHistory record or None
         """
-        result = await self.session.execute(
-            PriceHistory.__table__.select()
-            .where(PriceHistory.variant_id == variant_id)
-            .order_by(PriceHistory.created_at.desc())
-            .limit(1)
-        )
-        return result.fetchone()
+        return await self.repo.get_latest(variant_id)
 
 
 class FranchiseValidator:

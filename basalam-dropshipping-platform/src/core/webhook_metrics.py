@@ -3,10 +3,10 @@ Webhook Prometheus Metrics
 ==========================
 Prometheus metrics for webhook monitoring and observability.
 """
-import logging
+import structlog
 from prometheus_client import Counter, Histogram, Gauge
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 # =============================================================================

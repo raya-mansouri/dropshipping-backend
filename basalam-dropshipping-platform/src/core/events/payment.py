@@ -9,6 +9,7 @@ class PaymentReceived(DomainEvent):
     def __init__(
         self,
         order_id: UUID,
+        payment_id: UUID,
         amount: float,
         gateway: str,
         occurred_at: datetime = None,
@@ -21,6 +22,7 @@ class PaymentReceived(DomainEvent):
             metadata=metadata,
         )
         self.order_id = order_id
+        self.payment_id = payment_id
         self.amount = amount
         self.gateway = gateway
 
@@ -29,6 +31,7 @@ class PaymentToEscrow(DomainEvent):
     def __init__(
         self,
         order_id: UUID,
+        payment_id: UUID,
         amount: float,
         occurred_at: datetime = None,
         metadata: Dict[str, Any] = None,
@@ -40,6 +43,7 @@ class PaymentToEscrow(DomainEvent):
             metadata=metadata,
         )
         self.order_id = order_id
+        self.payment_id = payment_id
         self.amount = amount
 
 
@@ -47,6 +51,7 @@ class PaymentReleasedToSupplier(DomainEvent):
     def __init__(
         self,
         order_id: UUID,
+        payment_id: UUID,
         supplier_id: UUID,
         amount: float,
         occurred_at: datetime = None,
@@ -59,6 +64,7 @@ class PaymentReleasedToSupplier(DomainEvent):
             metadata=metadata,
         )
         self.order_id = order_id
+        self.payment_id = payment_id
         self.supplier_id = supplier_id
         self.amount = amount
 
@@ -66,6 +72,7 @@ class PaymentReleasedToSupplier(DomainEvent):
 class RefundInitiated(DomainEvent):
     def __init__(
         self,
+        payment_id: UUID,
         order_item_id: UUID,
         amount: float,
         reason: str,
@@ -78,6 +85,7 @@ class RefundInitiated(DomainEvent):
             occurred_at=occurred_at or datetime.utcnow(),
             metadata=metadata,
         )
+        self.payment_id = payment_id
         self.order_item_id = order_item_id
         self.amount = amount
         self.reason = reason
@@ -86,6 +94,8 @@ class RefundInitiated(DomainEvent):
 class RefundCompleted(DomainEvent):
     def __init__(
         self,
+        refund_id: UUID,
+        payment_id: UUID,
         order_item_id: UUID,
         amount: float,
         occurred_at: datetime = None,
@@ -97,5 +107,7 @@ class RefundCompleted(DomainEvent):
             occurred_at=occurred_at or datetime.utcnow(),
             metadata=metadata,
         )
+        self.refund_id = refund_id
+        self.payment_id = payment_id
         self.order_item_id = order_item_id
         self.amount = amount

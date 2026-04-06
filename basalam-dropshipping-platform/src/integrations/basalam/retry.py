@@ -1,12 +1,12 @@
 import asyncio
 import functools
-import logging
+import structlog
 import random
 from typing import Callable, Any, Tuple, Type, TypeVar
 
 from .exceptions import TokenExpiredError, RateLimitError, BasalamAPIError
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 T = TypeVar("T")
 

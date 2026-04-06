@@ -6,18 +6,26 @@ Handles payment lifecycle: creation, escrow, payout, refund.
 Flow: Order Created → Inventory Reserved → Seller Pays → Platform Holds (Escrow) →
       Supplier Ships → Delivered → 72h Dispute Window → Release to Supplier
 """
-import logging
-from datetime import datetime, timedelta
+import structlog
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional, List
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Payment, PaymentStatus, Refund, SupplierPayout
 from ..orders.models import Order, OrderItem
+from src.core.events.base import DomainEvent
+from src.core.events.publisher import EventPublisher
+from src.core.events.payment import (
+    PaymentReceived,
+    PaymentToEscrow,
+    RefundInitiated,
+    RefundCompleted,
+)
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # Default platform fee percentage
 DEFAULT_PLATFORM_FEE_PERCENT = Decimal("5.0")
@@ -31,8 +39,22 @@ HIGH_VALUE_THRESHOLD = Decimal("10000000")  # 10M IRR
 class PaymentService:
     """Service for managing payment lifecycle."""
 
-    def __init__(self, session: AsyncSession):
+    def __init__(
+        self,
+        session: AsyncSession,
+        event_publisher: Optional[EventPublisher] = None,
+    ):
         self.session = session
+        self._event_publisher = event_publisher
+
+    async def _publish_event(self, event: DomainEvent) -> None:
+        """Safely publish domain event. Non-blocking - failures are logged but don't raise."""
+        if self._event_publisher is None:
+            return
+        try:
+            await self._event_publisher.publish(topic="events", event=event)
+        except Exception as e:
+            logger.warning("failed_to_publish_event", event_type=event.event_type, error=str(e))
 
     async def create_payment(
         self,
@@ -75,8 +97,12 @@ class PaymentService:
         await self.session.flush()
 
         logger.info(
-            f"Created payment {payment.id} for order {order_id}: "
-            f"seller={total_seller_amount}, supplier={total_supplier_amount}, fee={platform_fee}"
+            "payment_created",
+            payment_id=str(payment.id),
+            order_id=str(order_id),
+            seller_amount=str(total_seller_amount),
+            supplier_amount=str(total_supplier_amount),
+            platform_fee=str(platform_fee),
         )
         return payment
 
@@ -93,12 +119,29 @@ class PaymentService:
             raise ValueError(f"Payment {payment_id} not found")
 
         payment.status = PaymentStatus.ESCROW.value
-        payment.paid_at = datetime.utcnow()
-        payment.escrow_started_at = datetime.utcnow()
+        payment.paid_at = datetime.now(timezone.utc)
+        payment.escrow_started_at = datetime.now(timezone.utc)
         payment.gateway_transaction_id = gateway_transaction_id
 
         await self.session.flush()
-        logger.info(f"Payment {payment_id} moved to escrow")
+
+        # Publish payment received / escrow event
+        event = PaymentReceived(
+            order_id=payment.order_id,
+            payment_id=payment.id,
+            amount=float(payment.seller_paid_amount),
+            gateway=payment.gateway or "unknown",
+        )
+        await self._publish_event(event)
+
+        escrow_event = PaymentToEscrow(
+            order_id=payment.order_id,
+            payment_id=payment.id,
+            amount=float(payment.seller_paid_amount),
+        )
+        await self._publish_event(escrow_event)
+
+        logger.info("payment_moved_to_escrow", payment_id=str(payment_id))
         return payment
 
     async def create_payout_after_delivery(
@@ -136,28 +179,31 @@ class PaymentService:
             amount=supplier_amount,
             status="pending",
             release_conditions_met=True,
-            delivery_confirmed_at=datetime.utcnow(),
-            dispute_window_ends_at=datetime.utcnow() + timedelta(hours=dispute_hours),
+            delivery_confirmed_at=datetime.now(timezone.utc),
+            dispute_window_ends_at=datetime.now(timezone.utc) + timedelta(hours=dispute_hours),
         )
         self.session.add(payout)
         await self.session.flush()
 
         logger.info(
-            f"Created payout {payout.id} for supplier {item.supplier_shop_id}, "
-            f"amount={supplier_amount}, dispute_window={dispute_hours}h"
+            "payout_created",
+            payout_id=str(payout.id),
+            supplier_shop_id=str(item.supplier_shop_id),
+            amount=str(supplier_amount),
+            dispute_window_hours=dispute_hours,
         )
         return payout
 
     async def release_mature_payouts(self) -> List[SupplierPayout]:
         """Release payouts where dispute window has expired."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         stmt = (
             select(SupplierPayout)
             .where(
                 and_(
                     SupplierPayout.status == "pending",
-                    SupplierPayout.release_conditions_met == True,
+                    SupplierPayout.release_conditions_met.is_(True),
                     SupplierPayout.dispute_window_ends_at <= now,
                 )
             )
@@ -165,25 +211,40 @@ class PaymentService:
         result = await self.session.execute(stmt)
         mature_payouts = result.scalars().all()
 
+        if not mature_payouts:
+            return []
+
+        # Batch-update all mature payouts in a single UPDATE query
+        payout_ids = [p.id for p in mature_payouts]
+        payment_ids = {p.payment_id for p in mature_payouts if p.payment_id}
+
+        await self.session.execute(
+            sa_update(SupplierPayout)
+            .where(SupplierPayout.id.in_(payout_ids))
+            .values(status="completed", released_at=now)
+        )
+
+        # Batch-update parent payments in a single UPDATE query
+        if payment_ids:
+            await self.session.execute(
+                sa_update(Payment)
+                .where(Payment.id.in_(payment_ids))
+                .values(
+                    status=PaymentStatus.SUPPLIER_PAID.value,
+                    supplier_paid_at=now,
+                )
+            )
+
+        await self.session.flush()
+
+        # Build return list with updated attributes for ORM consistency
         released = []
         for payout in mature_payouts:
             payout.status = "completed"
             payout.released_at = now
             released.append(payout)
 
-            # Update parent payment
-            if payout.payment_id:
-                payment_stmt = select(Payment).where(Payment.id == payout.payment_id)
-                pay_result = await self.session.execute(payment_stmt)
-                pay = pay_result.scalar_one_or_none()
-                if pay:
-                    pay.status = PaymentStatus.SUPPLIER_PAID.value
-                    pay.supplier_paid_at = now
-
-        await self.session.flush()
-
-        if released:
-            logger.info(f"Released {len(released)} mature payouts")
+        logger.info("mature_payouts_released", count=len(released))
         return released
 
     async def create_refund(
@@ -208,7 +269,21 @@ class PaymentService:
         self.session.add(refund)
         await self.session.flush()
 
-        logger.info(f"Created refund {refund.id} for payment {payment_id}, amount={amount}")
+        # Publish refund initiated event
+        event = RefundInitiated(
+            payment_id=payment_id,
+            order_item_id=order_item_id,
+            amount=float(amount),
+            reason=reason or "not_specified",
+        )
+        await self._publish_event(event)
+
+        logger.info(
+            "refund_created",
+            refund_id=str(refund.id),
+            payment_id=str(payment_id),
+            amount=str(amount),
+        )
         return refund
 
     async def process_refund(self, refund_id, approved_by) -> Refund:
@@ -221,8 +296,8 @@ class PaymentService:
 
         refund.status = "completed"
         refund.approved_by = approved_by
-        refund.approved_at = datetime.utcnow()
-        refund.completed_at = datetime.utcnow()
+        refund.approved_at = datetime.now(timezone.utc)
+        refund.completed_at = datetime.now(timezone.utc)
 
         # Update payment status
         if refund.payment_id:
@@ -231,7 +306,17 @@ class PaymentService:
             payment = pay_result.scalar_one_or_none()
             if payment:
                 payment.status = PaymentStatus.REFUNDED.value
-                payment.refunded_at = datetime.utcnow()
+                payment.refunded_at = datetime.now(timezone.utc)
 
         await self.session.flush()
+
+        # Publish refund completed event
+        event = RefundCompleted(
+            refund_id=refund.id,
+            payment_id=refund.payment_id,
+            order_item_id=refund.order_item_id,
+            amount=float(refund.amount),
+        )
+        await self._publish_event(event)
+
         return refund

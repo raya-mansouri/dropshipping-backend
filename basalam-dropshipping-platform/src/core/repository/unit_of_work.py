@@ -1,11 +1,11 @@
 from typing import Optional, Type, TypeVar, Generic
-import logging
+import structlog
 from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .base import BaseRepository
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 T = TypeVar('T')
 
@@ -114,7 +114,7 @@ class UnitOfWork:
             await self.session.commit()
             logger.debug("UnitOfWork commit successful")
         except Exception as e:
-            logger.error(f"UnitOfWork commit failed: {e}")
+            logger.error("unitofwork_commit_failed", error=str(e))
             await self.session.rollback()
             raise
 
@@ -124,7 +124,7 @@ class UnitOfWork:
             await self.session.rollback()
             logger.debug("UnitOfWork rollback successful")
         except Exception as e:
-            logger.error(f"UnitOfWork rollback failed: {e}")
+            logger.error("unitofwork_rollback_failed", error=str(e))
             # Force close on rollback failure
             await self.session.close()
             raise

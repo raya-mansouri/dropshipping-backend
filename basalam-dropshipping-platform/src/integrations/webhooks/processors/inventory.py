@@ -5,7 +5,7 @@ Handles inventory.updated events from supplier platforms.
 """
 
 from typing import Dict, Any
-import logging
+import structlog
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +14,7 @@ from .base import WebhookProcessor
 from src.core.repository.unit_of_work import UnitOfWork
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class InventoryWebhookProcessor(WebhookProcessor):
@@ -46,7 +46,7 @@ class InventoryWebhookProcessor(WebhookProcessor):
         event_type = self.get_event_type(payload, headers)
 
         if event_type != "inventory.updated":
-            logger.warning(f"Unexpected event type: {event_type}")
+            logger.warning("unexpected_event_type", event_type=event_type)
             return False
 
         event_data = self.extract_event_data(payload)
@@ -60,10 +60,10 @@ class InventoryWebhookProcessor(WebhookProcessor):
 
         try:
             await self._update_inventory(variant_id, inventory)
-            logger.info(f"Updated inventory for variant {variant_id}: {inventory}")
+            logger.info("updated_inventory", variant_id=str(variant_id), inventory=inventory)
             return True
         except Exception as e:
-            logger.error(f"Failed to update inventory: {e}")
+            logger.error("failed_to_update_inventory", error=str(e))
             return False
 
     async def _update_inventory(self, variant_id: str, inventory: int) -> None:
@@ -85,6 +85,6 @@ class InventoryWebhookProcessor(WebhookProcessor):
 
             if variant:
                 variant.inventory_quantity = inventory
-                logger.info(f"Updated inventory for variant {variant_id}: {inventory}")
+                logger.info("updated_inventory", variant_id=str(variant_id), inventory=inventory)
             else:
-                logger.warning(f"Variant not found: {variant_id}")
+                logger.warning("variant_not_found", variant_id=str(variant_id))

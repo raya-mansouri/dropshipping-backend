@@ -5,7 +5,7 @@ Platforms, shops, and integrations
 
 IMPORTANT: shop_role is ONLY 'supplier' OR 'seller' (not both) per a.md
 """
-from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, UniqueConstraint, Integer
+from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, UniqueConstraint, Integer, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from src.core.database import Base, TimestampMixin, UUIDMixin
@@ -153,6 +153,8 @@ class SyncState(Base, UUIDMixin, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint("integration_id", "entity_type", name="uq_sync_state_integration_entity"),
+        Index("idx_sync_states_last_sync", "last_sync_timestamp"),
+        Index("idx_sync_states_status", "status"),
     )
 
 

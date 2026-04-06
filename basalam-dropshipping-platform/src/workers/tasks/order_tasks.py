@@ -4,11 +4,11 @@ Order Sync Celery Tasks
 Periodic order synchronization tasks.
 """
 import asyncio
-import logging
+import structlog
 
 from celery import shared_task
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @shared_task(
@@ -40,12 +40,12 @@ def order_sync(self):
 
                 payment_service = PaymentService(session)
                 released = await payment_service.release_mature_payouts()
-                logger.info(f"Released {len(released)} payouts during order sync")
+                logger.info("released_payouts_during_order_sync", count=str(len(released)))
 
         asyncio.run(_sync())
         logger.info("Order sync task completed")
     except Exception as exc:
-        logger.error(f"Order sync task failed: {exc}")
+        logger.error("order_sync_task_failed", error=str(exc))
         raise self.retry(exc=exc)
 
 
@@ -70,12 +70,12 @@ def auto_confirm_deliveries(self):
                 released = await payment_service.release_mature_payouts()
 
                 for payout in released:
-                    logger.info(f"Auto-released payout {payout.id} for supplier {payout.supplier_id}")
+                    logger.info("auto_released_payout", payout_id=str(payout.id), supplier_id=str(payout.supplier_id))
 
                 await session.commit()
 
         asyncio.run(_confirm())
         logger.info("Auto-confirm deliveries task completed")
     except Exception as exc:
-        logger.error(f"Auto-confirm deliveries task failed: {exc}")
+        logger.error("auto_confirm_deliveries_task_failed", error=str(exc))
         raise self.retry(exc=exc)

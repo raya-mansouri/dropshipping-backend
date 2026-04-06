@@ -5,7 +5,7 @@ Handles payment.completed and payment.failed events.
 """
 
 from typing import Dict, Any
-import logging
+import structlog
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +14,7 @@ from .base import WebhookProcessor
 from src.core.repository.unit_of_work import UnitOfWork
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class PaymentWebhookProcessor(WebhookProcessor):
@@ -50,7 +50,7 @@ class PaymentWebhookProcessor(WebhookProcessor):
         event_type = self.get_event_type(payload, headers)
 
         if event_type not in ("payment.completed", "payment.failed"):
-            logger.warning(f"Unexpected event type: {event_type}")
+            logger.warning("unexpected_event_type", event_type=event_type)
             return False
 
         event_data = self.extract_event_data(payload)
@@ -68,10 +68,10 @@ class PaymentWebhookProcessor(WebhookProcessor):
             else:
                 await self._handle_payment_failed(event_data)
 
-            logger.info(f"Processed payment event: {event_type}")
+            logger.info("processed_payment_event", event_type=event_type)
             return True
         except Exception as e:
-            logger.error(f"Failed to process payment: {e}")
+            logger.error("failed_to_process_payment", error=str(e))
             return False
 
     async def _handle_payment_completed(self, data: Dict[str, Any]) -> None:
@@ -89,7 +89,7 @@ class PaymentWebhookProcessor(WebhookProcessor):
 
             if order:
                 order.payment_status = "paid"
-                logger.info(f"Marked order {order_id} as paid")
+                logger.info("marked_order_paid", order_id=str(order_id))
 
     async def _handle_payment_failed(self, data: Dict[str, Any]) -> None:
         """Handle failed payment"""
@@ -106,4 +106,4 @@ class PaymentWebhookProcessor(WebhookProcessor):
 
             if order:
                 order.payment_status = "failed"
-                logger.info(f"Marked order {order_id} as payment failed")
+                logger.info("marked_order_payment_failed", order_id=str(order_id))

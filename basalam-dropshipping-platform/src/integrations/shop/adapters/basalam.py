@@ -10,7 +10,7 @@ This is an ADAPTER in Hexagonal Architecture:
 """
 import hashlib
 import hmac
-import logging
+import structlog
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 
@@ -25,7 +25,7 @@ from ..ports import (
     OAuthConfig,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class BasalamConnectorAdapter(ShopConnectorPort):

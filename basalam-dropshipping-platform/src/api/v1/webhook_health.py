@@ -3,7 +3,7 @@ Webhook Health Monitoring Endpoints
 ====================================
 Health check and metrics endpoints for webhook system status.
 """
-import logging
+import structlog
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from uuid import UUID
@@ -17,7 +17,7 @@ from src.core.database import get_db
 from src.core.config import get_settings
 
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["Webhook Health"])
 

@@ -5,7 +5,7 @@ Handles page-based pagination, delta sync, and bulk upserts.
 """
 
 import asyncio
-import logging
+import structlog
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
 from uuid import UUID
@@ -20,7 +20,7 @@ from src.domains.shops.repository.sync_state import SyncStateRepository
 from src.integrations.basalam.client import BasalamClient
 from src.integrations.basalam.exceptions import BasalamAPIError, ForbiddenProductError
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class ProductSyncResult:
@@ -148,8 +148,9 @@ class ProductSyncService:
             ProductSyncResult with sync statistics
         """
         logger.info(
-            f"Starting product sync for integration {self.integration_id}, "
-            f"full_sync={full_sync}"
+            "starting_product_sync",
+            integration_id=str(self.integration_id),
+            full_sync=full_sync,
         )
 
         sync_state = await self._get_or_create_sync_state("product")
@@ -181,7 +182,7 @@ class ProductSyncService:
                 status="idle",
             )
 
-            logger.info(f"Product sync completed: {result}")
+            logger.info("product_sync_completed", result=str(result))
 
             return result
 
@@ -217,11 +218,11 @@ class ProductSyncService:
                 last_modified=last_modified,
             )
         except ForbiddenProductError as e:
-            logger.warning(f"Forbidden product detected: {e}")
+            logger.warning("forbidden_product_detected", error=str(e))
             await self._handle_forbidden_product(e)
             # Don't fail the whole sync for one forbidden product
         except BasalamAPIError as e:
-            logger.error(f"Failed to fetch products page: {e}")
+            logger.error("failed_to_fetch_products_page", error=str(e))
             result.errors.append(f"API Error: {str(e)}")
             return result
 
@@ -253,7 +254,7 @@ class ProductSyncService:
                     last_modified=last_modified,
                 )
             except BasalamAPIError as e:
-                logger.error(f"Failed to fetch products page {page}: {e}")
+                logger.error("failed_to_fetch_products_page", page=page, error=str(e))
                 result.errors.append(f"API Error on page {page}: {str(e)}")
                 break
 
@@ -429,7 +430,7 @@ class ProductSyncService:
         processed_results = []
         for result in results:
             if isinstance(result, Exception):
-                logger.error(f"Batch processing failed: {result}")
+                logger.error("batch_processing_failed", error=str(result))
                 processed_results.append((0, 0, len(batches[0])))
             else:
                 processed_results.append(result)
@@ -479,7 +480,7 @@ class ProductSyncService:
                 updated_count += updated_v
 
         except Exception as e:
-            logger.error(f"Batch upsert failed: {e}")
+            logger.error("batch_upsert_failed", error=str(e))
             failed_count = len(products)
             raise
 
@@ -662,7 +663,7 @@ class ProductSyncService:
         await self.session.execute(stmt)
         await self.session.commit()
 
-        logger.info(f"Updated product {product_id} status to forbidden")
+        logger.info("product_status_updated_to_forbidden", product_id=str(product_id))
 
         # Notify sellers with affected listings
         await self._notify_sellers_for_forbidden_product(str(product_id), error)
@@ -716,9 +717,9 @@ class ProductSyncService:
                         "action": "This product has been removed from sale. Please review and remove it from your store.",
                     },
                 )
-                logger.info(f"Notified seller shop {listing.shop_id} about forbidden product {external_product_id}")
+                logger.info("notified_seller_about_forbidden_product", shop_id=str(listing.shop_id), external_product_id=external_product_id)
             except Exception as notify_err:
-                logger.error(f"Failed to notify seller {listing.shop_id}: {notify_err}")
+                logger.error("failed_to_notify_seller", shop_id=str(listing.shop_id), error=str(notify_err))
 
     async def get_sync_status(self) -> Dict[str, Any]:
         """Get current sync status for this integration."""
@@ -752,4 +753,4 @@ class ProductSyncService:
         sync_state.last_error = None
         await self.session.flush()
 
-        logger.info(f"Sync state reset for integration {self.integration_id}")
+        logger.info("sync_state_reset", integration_id=str(self.integration_id))
