@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import get_settings
-from src.core.database import get_db
+from src.api.deps import get_db
 from src.core.repository.unit_of_work import UnitOfWork
 from src.domains.shops.repository import ShopIntegrationRepository, PlatformRepository
 from src.domains.webhooks.repository.webhook_event import WebhookEventRepository

@@ -6,16 +6,17 @@ FastAPI endpoints for authentication and user management
 
 from uuid import UUID
 from typing import Optional
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime, timedelta
-import hashlib
-import secrets
 
-from src.core.database import get_db
+import structlog
+from passlib.context import CryptContext
+
+from src.api.deps import get_db, get_current_user, decode_token
 from src.core.config import get_settings
 from src.domains.accounts.models import User, Account
 from src.domains.accounts.schemas import (
@@ -45,7 +46,8 @@ ALGORITHM = get_settings().jwt_algorithm
 ACCESS_TOKEN_EXPIRE_MINUTES = get_settings().access_token_expire_minutes
 REFRESH_TOKEN_EXPIRE_DAYS = get_settings().refresh_token_expire_days
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+logger = structlog.get_logger(__name__)
 
 
 # ============================================
@@ -54,20 +56,20 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
 def hash_password(password: str) -> str:
-    """Hash password using SHA256 (in production, use bcrypt)"""
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Hash password using bcrypt"""
+    return pwd_context.hash(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify password against hash"""
-    return hash_password(plain_password) == hashed_password
+    """Verify password against bcrypt hash"""
+    return pwd_context.verify(plain_password, hashed_password)
 
 
 def create_access_token(user_id: UUID) -> str:
     """Create JWT access token"""
     import jwt
 
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {"sub": str(user_id), "type": "access", "exp": expire}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
@@ -76,58 +78,9 @@ def create_refresh_token(user_id: UUID) -> str:
     """Create JWT refresh token"""
     import jwt
 
-    expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     payload = {"sub": str(user_id), "type": "refresh", "exp": expire}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-
-
-def decode_token(token: str) -> dict:
-    """Decode and validate JWT token"""
-    import jwt
-
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except jwt.InvalidTokenError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-
-async def get_current_user(
-    token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)
-) -> User:
-    """Get current authenticated user from token"""
-    payload = decode_token(token)
-    user_id = payload.get("sub")
-
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload"
-        )
-
-    result = await db.execute(select(User).where(User.id == UUID(user_id)))
-    user = result.scalar_one_or_none()
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
-        )
-
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive"
-        )
-
-    return user
 
 
 # ============================================
@@ -380,9 +333,8 @@ async def forgot_password(
     """
     Request password reset using phone number
 
-    In production, send reset code via SMS
+    Generates a short-lived reset token. In production, send via SMS.
     """
-    # Validate phone format
     is_valid, error = validate_iranian_phone(reset_data.phone)
     if not is_valid:
         raise HTTPException(
@@ -394,10 +346,24 @@ async def forgot_password(
     user = result.scalar_one_or_none()
 
     if user:
-        reset_token = secrets.token_urlsafe(32)
-        # In production: send SMS with reset code to phone number
+        import jwt as jwt_module
 
-    # Always return success message for security
+        # Create a short-lived reset token (10 minutes)
+        reset_expire = datetime.now(timezone.utc) + timedelta(minutes=10)
+        reset_payload = {
+            "sub": str(user.id),
+            "phone": user.phone,
+            "type": "password_reset",
+            "exp": reset_expire,
+        }
+        _reset_token = jwt_module.encode(  # noqa: F841 — TODO: send via SMS
+            reset_payload, SECRET_KEY, algorithm=ALGORITHM
+        )
+        # In production: send SMS with reset code to phone number
+        # TODO: Store reset_token in Redis with TTL and send via SMS
+        logger.info("password_reset_requested", user_id=str(user.id))
+
+    # Always return success message for security (don't reveal if phone exists)
     return {"message": "If the phone number exists, a reset code has been sent"}
 
 
@@ -407,12 +373,38 @@ class PasswordResetConfirmRequest(BaseModel):
 
 
 @router.post("/reset-password")
-async def reset_password(reset_data: PasswordResetConfirmRequest):
+async def reset_password(
+    reset_data: PasswordResetConfirmRequest,
+    db: AsyncSession = Depends(get_db),
+):
     """
     Reset password using token
 
-    In production: validate token and update password
+    Validates the reset token from forgot-password flow and updates the password.
     """
+    # Decode the reset token to get the phone number
+    payload = decode_token(reset_data.reset_token)
+    phone = payload.get("phone")
+    token_type = payload.get("type")
+
+    if not phone or token_type != "password_reset":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+
+    result = await db.execute(select(User).where(User.phone == phone))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset token",
+        )
+
+    user.password_hash = hash_password(reset_data.new_password)
+    await db.flush()
+
     return {"message": "Password reset successfully"}
 
 
@@ -480,6 +472,16 @@ async def update_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     update_dict = user_data.model_dump(exclude_unset=True)
+
+    # Validate role against UserRole enum to prevent privilege escalation
+    if "role" in update_dict:
+        valid_roles = [r.value for r in UserRole]
+        if update_dict["role"] not in valid_roles:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Invalid role. Must be one of: {valid_roles}",
+            )
+
     for field, value in update_dict.items():
         setattr(user, field, value)
 

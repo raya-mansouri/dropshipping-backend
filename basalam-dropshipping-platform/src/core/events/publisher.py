@@ -1,11 +1,9 @@
 import json
 import structlog
 from typing import List, Dict, Any, Optional
-from datetime import datetime
-from uuid import UUID
-from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
+from datetime import datetime, timezone
+from aiokafka import AIOKafkaProducer
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import insert
 
 from .base import DomainEvent
 
@@ -30,17 +28,23 @@ class TopicRouter:
 
     def register_default_routes(self) -> None:
         """Register default topic routes for common event types."""
-        self.register_route("inventory.reserved", "inventory.updated")
-        self.register_route("inventory.released", "inventory.updated")
-        self.register_route("inventory.consumed", "inventory.updated")
-        self.register_route("order.created", "order.created")
-        self.register_route("order.updated", "order.created")
-        self.register_route("payment.held", "payment.updated")
-        self.register_route("payment.released", "payment.updated")
-        self.register_route("payment.refunded", "payment.updated")
-        self.register_route("product.created", "product.updated")
-        self.register_route("product.updated", "product.updated")
-        self.register_route("product.deleted", "product.updated")
+        self.register_route("InventoryReserved", "inventory.updated")
+        self.register_route("InventoryReleased", "inventory.updated")
+        self.register_route("InventoryUpdated", "inventory.updated")
+        self.register_route("InventorySyncCompleted", "inventory.updated")
+        self.register_route("OrderCreated", "order.created")
+        self.register_route("OrderPaid", "order.created")
+        self.register_route("OrderCancelled", "order.cancelled")
+        self.register_route("OrderStatusChanged", "order.updated")
+        self.register_route("OrderShipped", "order.shipped")
+        self.register_route("PaymentHeld", "payment.updated")
+        self.register_route("PaymentReleased", "payment.updated")
+        self.register_route("PaymentRefunded", "payment.updated")
+        self.register_route("ProductCreated", "product.updated")
+        self.register_route("ProductUpdated", "product.updated")
+        self.register_route("ProductStatusChanged", "product.updated")
+        self.register_route("ProductForbid", "product.updated")
+        self.register_route("ProductSynced", "product.updated")
 
 
 class EventStore:
@@ -63,8 +67,8 @@ class EventStore:
             platform_id="event_store",
             event_id=str(event.event_id),
             payload_hash="",
-            processed_at=datetime.utcnow(),
-            created_at=datetime.utcnow(),
+            processed_at=datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc),
             metadata=json.dumps(
                 {
                     "event_type": event.event_type,
@@ -85,6 +89,7 @@ class EventStore:
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
         """Retrieve events from the event store."""
+        from sqlalchemy import select
         from src.domains.webhooks.models import WebhookEventLog
 
         stmt = select(WebhookEventLog).order_by(WebhookEventLog.created_at).limit(limit)

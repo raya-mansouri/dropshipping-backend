@@ -4,10 +4,10 @@ Iranian Phone Number Validator
 Validates Iranian mobile phone numbers (11 digits starting with 09)
 """
 import re
-from typing import Optional
+from typing import Optional, Annotated
 
-# Iranian phone number regex: 11 digits starting with 09
-IRANIAN_PHONE_REGEX = re.compile(r'^09\d{9}$')
+from pydantic import BeforeValidator
+
 
 # Error messages
 ERROR_INVALID_FORMAT = "Phone number must be exactly 11 digits starting with 09"
@@ -81,17 +81,33 @@ def normalize_iranian_phone(phone: Optional[str]) -> Optional[str]:
     return None
 
 
+def _validate_phone_pydantic(value):
+    """Pydantic v2 validator function for Iranian phone numbers."""
+    if value is None:
+        return value
+    is_valid, error = validate_iranian_phone(value)
+    if not is_valid:
+        raise ValueError(error)
+    return value
+
+
+# Pydantic v2 compatible type: use as Annotated[str, IranianPhoneType]
+IranianPhoneType = Annotated[str, BeforeValidator(_validate_phone_pydantic)]
+
+
+# Legacy class kept for backward compatibility
 class IranianPhoneValidator:
-    """Pydantic-compatible validator for Iranian phone numbers"""
-    
+    """Pydantic v2 compatible validator for Iranian phone numbers.
+
+    Usage with Pydantic v2:
+        phone: Annotated[str, BeforeValidator(IranianPhoneValidator.validate)]
+    """
+
     @classmethod
-    def __get_validators__(cls):
-        """For Pydantic v1 compatibility"""
-        yield cls.validate
-    
-    @classmethod
-    def validate(cls, v, info=None):
+    def validate(cls, v):
         """Validate phone number"""
+        if v is None:
+            return v
         is_valid, error = validate_iranian_phone(v)
         if not is_valid:
             raise ValueError(error)
@@ -103,7 +119,7 @@ __all__ = [
     'validate_iranian_phone',
     'normalize_iranian_phone',
     'IranianPhoneValidator',
-    'IRANIAN_PHONE_REGEX',
+    'IranianPhoneType',
     'ERROR_INVALID_FORMAT',
     'ERROR_INVALID_LENGTH',
     'ERROR_INVALID_PREFIX',

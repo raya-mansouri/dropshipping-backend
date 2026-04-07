@@ -114,7 +114,7 @@ class SyncJob(Base, UUIDMixin, TimestampMixin):
     entity_id = Column(UUID(as_uuid=True))
     
     status = Column(String(30), default="pending")  # pending, running, completed, failed
-    retry_count = Column(String(20), default=0)
+    retry_count = Column(Integer, default=0)
     error_message = Column(String(2000))
     
     scheduled_at = Column(DateTime)

@@ -4,17 +4,16 @@ Webhook Health Monitoring Endpoints
 Health check and metrics endpoints for webhook system status.
 """
 import structlog
-from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import text, func
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.database import get_db
-from src.core.config import get_settings
+from src.api.deps import get_db, get_current_user
+from src.domains.accounts.models import User
 
 
 logger = structlog.get_logger(__name__)
@@ -63,6 +62,7 @@ class OutgoingDLQEntry(BaseModel):
 )
 async def get_webhook_health(
     session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Get overall webhook system health status.
@@ -185,6 +185,7 @@ async def get_webhook_health(
 async def get_integration_webhook_status(
     integration_id: UUID,
     session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get webhook status for a specific integration."""
     # Get integration with platform info
@@ -216,7 +217,6 @@ async def get_integration_webhook_status(
 
     row = result.fetchone()
     if not row:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Integration not found")
 
     processed = row[5] or 0
@@ -243,6 +243,7 @@ async def get_integration_webhook_status(
 )
 async def list_outgoing_dlq(
     session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     status: str = Query("pending", description="Filter by status"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -297,8 +298,12 @@ async def list_outgoing_dlq(
 async def retry_dlq_entry(
     dlq_id: UUID,
     session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Manually retry a failed webhook from the DLQ."""
+    if current_user.role not in ["admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     # Get DLQ entry
     result = await session.execute(text("""
         SELECT id, outgoing_webhook_log_id, status
@@ -308,7 +313,6 @@ async def retry_dlq_entry(
 
     dlq_entry = result.fetchone()
     if not dlq_entry:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="DLQ entry not found")
 
     # Reset webhook log for retry
@@ -341,8 +345,12 @@ async def retry_dlq_entry(
 async def remove_dlq_entry(
     dlq_id: UUID,
     session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Remove an entry from the outgoing webhook DLQ."""
+    if current_user.role not in ["admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
     result = await session.execute(text("""
         DELETE FROM outgoing_webhook_dlq
         WHERE id = :dlq_id
@@ -351,7 +359,6 @@ async def remove_dlq_entry(
 
     deleted = result.fetchone()
     if not deleted:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="DLQ entry not found")
 
     await session.commit()

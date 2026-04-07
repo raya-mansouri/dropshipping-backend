@@ -67,6 +67,15 @@ async def get_current_user(
 ) -> User:
     """Get current authenticated user from token"""
     payload = decode_token(token)
+
+    # Validate token type — reject refresh tokens used as access tokens
+    if payload.get("type") != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     user_id = payload.get("sub")
 
     if not user_id:
@@ -100,13 +109,16 @@ async def get_current_active_user(
 
 
 async def get_redis() -> Optional[redis.Redis]:
-    """Get Redis client"""
-    redis_url = get_settings().redis_url
+    """Get shared Redis client (singleton via core module)"""
+    import structlog
+
+    logger = structlog.get_logger(__name__)
+    from src.core.redis_client import get_redis_client
     try:
-        client = redis.from_url(redis_url, decode_responses=True)
+        client = await get_redis_client()
         yield client
-        await client.close()
-    except Exception:
+    except Exception as e:
+        logger.warning("redis_unavailable", error=str(e))
         yield None
 
 

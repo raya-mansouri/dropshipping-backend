@@ -14,7 +14,7 @@ Handles:
 
 import structlog
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from uuid import UUID, uuid4
 from decimal import Decimal
@@ -177,8 +177,8 @@ class OrderService:
             actor_type=actor_type,
             actor_id=actor_id,
             reason=reason,
-            metadata=metadata or {},
-            created_at=datetime.utcnow(),
+            extra_data=metadata or {},
+            created_at=datetime.now(timezone.utc),
         )
         self.session.add(history)
         await self.session.flush()
@@ -297,9 +297,9 @@ class OrderService:
             discount=discount,
             status=OrderStatus.PENDING.value,
             notes=notes,
-            metadata={},
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            extra_data={},
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
         )
         self.session.add(order)
         await self.session.flush()
@@ -319,8 +319,8 @@ class OrderService:
                     shipping_price=Decimal("0"),
                     profit=item_data["profit"],
                     status=OrderStatus.PENDING.value,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow(),
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
                 )
                 self.session.add(order_item)
                 order_items.append(order_item)
@@ -391,7 +391,7 @@ class OrderService:
                 f"Cannot transition from {current_status.value} to {new_status.value}"
             )
 
-        update_data = {"status": new_status.value, "updated_at": datetime.utcnow()}
+        update_data = {"status": new_status.value, "updated_at": datetime.now(timezone.utc)}
 
         timestamp_field = {
             OrderStatus.CONFIRMED: "confirmed_at",
@@ -403,7 +403,7 @@ class OrderService:
         }.get(new_status)
 
         if timestamp_field:
-            update_data[timestamp_field] = datetime.utcnow()
+            update_data[timestamp_field] = datetime.now(timezone.utc)
 
         await self._order_repo.update(order_id, update_data)
 
@@ -559,11 +559,11 @@ class OrderItemService:
         """Update order item status"""
         update_data = {
             "status": status.value,
-            "updated_at": datetime.utcnow(),
+            "updated_at": datetime.now(timezone.utc),
         }
 
         if status == OrderStatus.CANCELLED and reject_reason:
             update_data["reject_reason"] = reject_reason
-            update_data["rejected_at"] = datetime.utcnow()
+            update_data["rejected_at"] = datetime.now(timezone.utc)
 
         return await self._order_item_repo.update(item_id, update_data)

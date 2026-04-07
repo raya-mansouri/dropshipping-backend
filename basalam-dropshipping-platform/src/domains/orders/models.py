@@ -7,12 +7,11 @@ Order states per a.md:
 - pending → confirmed → paid → processing → shipped → delivered → completed
 - Failure states: cancelled, disputed, refunded
 """
-from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Integer, Numeric, Text, Index
+from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Numeric, Text, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from src.core.database import Base, TimestampMixin, UUIDMixin
-import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -142,7 +141,7 @@ class OrderHistory(Base, UUIDMixin):
     reason = Column(Text)
     extra_data = Column("metadata", JSONB, default=dict)
     
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
 class Shipment(Base, UUIDMixin, TimestampMixin):

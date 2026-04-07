@@ -7,12 +7,12 @@ FastAPI endpoints for order management
 from uuid import UUID
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime
+from datetime import datetime, timezone
 
-from src.core.database import get_db
+from src.api.deps import get_db, get_current_user
+from src.domains.accounts.models import User
 from src.domains.orders.models import (
     Order,
     OrderItem,
@@ -25,7 +25,6 @@ from src.domains.orders.schemas import (
     OrderCreate,
     OrderUpdate,
     OrderItemResponse,
-    OrderItemCreate,
     ShipmentResponse,
     ShipmentStatus,
     DeliveryConfirmRequest,
@@ -51,6 +50,7 @@ async def create_order(
     shop_id: UUID,
     external_order_id: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Create a new order
@@ -142,6 +142,7 @@ async def list_orders(
     status: Optional[SchemaOrderStatus] = None,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    current_user: User = Depends(get_current_user),
 ):
     """List orders with filters"""
     query = select(Order)
@@ -158,7 +159,7 @@ async def list_orders(
 
 
 @router.get("/{order_id}", response_model=OrderResponse)
-async def get_order(order_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_order(order_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Get order by ID"""
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
@@ -169,7 +170,8 @@ async def get_order(order_id: UUID, db: AsyncSession = Depends(get_db)):
 
 @router.patch("/{order_id}", response_model=OrderResponse)
 async def update_order(
-    order_id: UUID, order_data: OrderUpdate, db: AsyncSession = Depends(get_db)
+    order_id: UUID, order_data: OrderUpdate, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update order status or notes"""
     result = await db.execute(select(Order).where(Order.id == order_id))
@@ -183,7 +185,7 @@ async def update_order(
         new_status = update_dict["status"]
         old_status = order.status
 
-        setattr(order, f"{new_status.value}_at", datetime.utcnow())
+        setattr(order, f"{new_status.value}_at", datetime.now(timezone.utc))
 
         history = OrderHistory(
             order_id=order.id,
@@ -207,7 +209,8 @@ async def update_order(
 
 @router.post("/{order_id}/cancel", response_model=OrderResponse)
 async def cancel_order(
-    order_id: UUID, reason: Optional[str] = None, db: AsyncSession = Depends(get_db)
+    order_id: UUID, reason: Optional[str] = None, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Cancel an order
@@ -232,7 +235,7 @@ async def cancel_order(
 
     old_status = order.status
     order.status = ModelOrderStatus.CANCELLED.value
-    order.cancelled_at = datetime.utcnow()
+    order.cancelled_at = datetime.now(timezone.utc)
 
     history = OrderHistory(
         order_id=order.id,
@@ -252,7 +255,7 @@ async def cancel_order(
 
 
 @router.get("/{order_id}/items", response_model=List[OrderItemResponse])
-async def list_order_items(order_id: UUID, db: AsyncSession = Depends(get_db)):
+async def list_order_items(order_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """List items for an order"""
     order_result = await db.execute(select(Order).where(Order.id == order_id))
     if not order_result.scalar_one_or_none():
@@ -263,7 +266,7 @@ async def list_order_items(order_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/items/{item_id}", response_model=OrderItemResponse)
-async def get_order_item(item_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_order_item(item_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Get order item by ID"""
     result = await db.execute(select(OrderItem).where(OrderItem.id == item_id))
     item = result.scalar_one_or_none()
@@ -276,7 +279,7 @@ async def get_order_item(item_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{order_id}/history", response_model=List[OrderHistoryResponse])
-async def list_order_history(order_id: UUID, db: AsyncSession = Depends(get_db)):
+async def list_order_history(order_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Get order status history"""
     order_result = await db.execute(select(Order).where(Order.id == order_id))
     if not order_result.scalar_one_or_none():
@@ -294,7 +297,7 @@ async def list_order_history(order_id: UUID, db: AsyncSession = Depends(get_db))
 
 
 @router.get("/{order_id}/shipments", response_model=List[ShipmentResponse])
-async def list_shipments(order_id: UUID, db: AsyncSession = Depends(get_db)):
+async def list_shipments(order_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """List shipments for an order"""
     order_result = await db.execute(select(Order).where(Order.id == order_id))
     if not order_result.scalar_one_or_none():
@@ -305,7 +308,7 @@ async def list_shipments(order_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/shipments/{shipment_id}", response_model=ShipmentResponse)
-async def get_shipment(shipment_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_shipment(shipment_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Get shipment by ID"""
     result = await db.execute(select(Shipment).where(Shipment.id == shipment_id))
     shipment = result.scalar_one_or_none()
@@ -319,6 +322,7 @@ async def confirm_delivery(
     shipment_id: UUID,
     confirm_data: DeliveryConfirmRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Confirm delivery of a shipment"""
     result = await db.execute(select(Shipment).where(Shipment.id == shipment_id))
@@ -326,7 +330,7 @@ async def confirm_delivery(
     if not shipment:
         raise HTTPException(status_code=404, detail="Shipment not found")
 
-    shipment.delivery_confirmed_at = datetime.utcnow()
+    shipment.delivery_confirmed_at = datetime.now(timezone.utc)
     shipment.delivery_confirmed_by = confirm_data.confirmed_by
     shipment.status = ShipmentStatus.DELIVERED.value
 
@@ -338,7 +342,7 @@ async def confirm_delivery(
 
 
 @router.post("/{order_id}/confirm", response_model=OrderResponse)
-async def confirm_order(order_id: UUID, db: AsyncSession = Depends(get_db)):
+async def confirm_order(order_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Confirm an order"""
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
@@ -347,12 +351,12 @@ async def confirm_order(order_id: UUID, db: AsyncSession = Depends(get_db)):
 
     if order.status != ModelOrderStatus.PENDING.value:
         raise HTTPException(
-            status_code=400, detail=f"Only pending orders can be confirmed"
+            status_code=400, detail="Only pending orders can be confirmed"
         )
 
     old_status = order.status
     order.status = ModelOrderStatus.CONFIRMED.value
-    order.confirmed_at = datetime.utcnow()
+    order.confirmed_at = datetime.now(timezone.utc)
 
     history = OrderHistory(
         order_id=order.id,
@@ -369,7 +373,7 @@ async def confirm_order(order_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{order_id}/mark-paid", response_model=OrderResponse)
-async def mark_order_paid(order_id: UUID, db: AsyncSession = Depends(get_db)):
+async def mark_order_paid(order_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Mark order as paid"""
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
@@ -378,12 +382,12 @@ async def mark_order_paid(order_id: UUID, db: AsyncSession = Depends(get_db)):
 
     if order.status != ModelOrderStatus.CONFIRMED.value:
         raise HTTPException(
-            status_code=400, detail=f"Only confirmed orders can be marked as paid"
+            status_code=400, detail="Only confirmed orders can be marked as paid"
         )
 
     old_status = order.status
     order.status = ModelOrderStatus.PAID.value
-    order.paid_at = datetime.utcnow()
+    order.paid_at = datetime.now(timezone.utc)
 
     history = OrderHistory(
         order_id=order.id,
@@ -405,6 +409,7 @@ async def mark_order_shipped(
     tracking_code: Optional[str] = None,
     carrier: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Mark order as shipped"""
     result = await db.execute(select(Order).where(Order.id == order_id))
@@ -414,12 +419,12 @@ async def mark_order_shipped(
 
     if order.status != ModelOrderStatus.PAID.value:
         raise HTTPException(
-            status_code=400, detail=f"Only paid orders can be marked as shipped"
+            status_code=400, detail="Only paid orders can be marked as shipped"
         )
 
     old_status = order.status
     order.status = ModelOrderStatus.SHIPPED.value
-    order.shipped_at = datetime.utcnow()
+    order.shipped_at = datetime.now(timezone.utc)
 
     if tracking_code or carrier:
         for item in order.items:
@@ -429,7 +434,7 @@ async def mark_order_shipped(
                 tracking_code=tracking_code,
                 carrier=carrier,
                 status=ShipmentStatus.SHIPPED.value,
-                shipped_at=datetime.utcnow(),
+                shipped_at=datetime.now(timezone.utc),
             )
             db.add(shipment)
 
@@ -448,7 +453,7 @@ async def mark_order_shipped(
 
 
 @router.post("/{order_id}/mark-delivered", response_model=OrderResponse)
-async def mark_order_delivered(order_id: UUID, db: AsyncSession = Depends(get_db)):
+async def mark_order_delivered(order_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Mark order as delivered"""
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
@@ -457,12 +462,12 @@ async def mark_order_delivered(order_id: UUID, db: AsyncSession = Depends(get_db
 
     if order.status != ModelOrderStatus.SHIPPED.value:
         raise HTTPException(
-            status_code=400, detail=f"Only shipped orders can be marked as delivered"
+            status_code=400, detail="Only shipped orders can be marked as delivered"
         )
 
     old_status = order.status
     order.status = ModelOrderStatus.DELIVERED.value
-    order.delivered_at = datetime.utcnow()
+    order.delivered_at = datetime.now(timezone.utc)
 
     history = OrderHistory(
         order_id=order.id,
@@ -479,7 +484,7 @@ async def mark_order_delivered(order_id: UUID, db: AsyncSession = Depends(get_db
 
 
 @router.post("/{order_id}/complete", response_model=OrderResponse)
-async def complete_order(order_id: UUID, db: AsyncSession = Depends(get_db)):
+async def complete_order(order_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Complete an order (final status)"""
     result = await db.execute(select(Order).where(Order.id == order_id))
     order = result.scalar_one_or_none()
@@ -488,12 +493,12 @@ async def complete_order(order_id: UUID, db: AsyncSession = Depends(get_db)):
 
     if order.status != ModelOrderStatus.DELIVERED.value:
         raise HTTPException(
-            status_code=400, detail=f"Only delivered orders can be completed"
+            status_code=400, detail="Only delivered orders can be completed"
         )
 
     old_status = order.status
     order.status = ModelOrderStatus.COMPLETED.value
-    order.completed_at = datetime.utcnow()
+    order.completed_at = datetime.now(timezone.utc)
 
     history = OrderHistory(
         order_id=order.id,

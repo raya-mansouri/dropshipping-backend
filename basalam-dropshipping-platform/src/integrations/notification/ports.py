@@ -17,11 +17,7 @@ from src.core.validators.phone import validate_iranian_phone
 # NOTIFICATION TYPES
 # ============================================
 
-class NotificationChannel(str, Enum):
-    """Available notification channels"""
-    SMS = "sms"
-    IN_APP = "in_app"
-    WEBHOOK = "webhook"
+from src.domains.notifications.models import NotificationChannel
 
 
 class NotificationPriority(str, Enum):

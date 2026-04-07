@@ -134,7 +134,7 @@ class RetryScheduler:
             status="pending",
         )
         self.db_session.add(retry)
-        await self.db_session.commit()
+        await self.db_session.flush()
 
     async def _mark_as_failed(self, event_id: str) -> None:
         """Mark event as permanently failed and move to DLQ"""
@@ -159,7 +159,7 @@ class RetryScheduler:
                 status="pending",
             )
             self.db_session.add(dlq_entry)
-            await self.db_session.commit()
+            await self.db_session.flush()
 
             logger.warning("event_moved_to_dlq", event_id=str(event_id))
 

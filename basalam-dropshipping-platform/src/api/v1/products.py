@@ -7,12 +7,12 @@ FastAPI endpoints for product management
 from uuid import UUID
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime
 
-from src.core.database import get_db
+from src.api.deps import get_db, get_current_user
+from src.domains.accounts.models import User
 from src.domains.products.models import (
     SupplierProduct,
     ProductVariant,
@@ -28,7 +28,6 @@ from src.domains.products.schemas import (
     SupplierProductUpdate,
     ProductVariantResponse,
     SupplierVariantResponse,
-    SupplierVariantCreate,
     SellerListingResponse,
     SellerListingCreate,
     SellerListingUpdate,
@@ -39,8 +38,14 @@ from src.domains.products.schemas import (
     ProductMediaResponse,
     ProductMediaBase,
     ProductStatus,
-    VariantStatus,
 )
+
+
+class ProductVariantCreateRequest(BaseModel):
+    """Schema for creating a product variant"""
+    sku: Optional[str] = None
+    external_variant_id: Optional[str] = None
+    attributes: Optional[dict] = None
 
 
 # ============================================
@@ -55,6 +60,7 @@ router = APIRouter(prefix="/products", tags=["products"])
 
 @router.get("/categories", response_model=List[CategoryResponse])
 async def list_categories(
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     parent_id: Optional[UUID] = None,
     is_active: Optional[bool] = True,
@@ -71,7 +77,7 @@ async def list_categories(
 
 
 @router.get("/categories/{category_id}", response_model=CategoryResponse)
-async def get_category(category_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_category(category_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Get category by ID"""
     result = await db.execute(select(Category).where(Category.id == category_id))
     category = result.scalar_one_or_none()
@@ -84,7 +90,7 @@ async def get_category(category_id: UUID, db: AsyncSession = Depends(get_db)):
     "/categories", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED
 )
 async def create_category(
-    category_data: CategoryBase, db: AsyncSession = Depends(get_db)
+    category_data: CategoryBase, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """Create a new category"""
     category = Category(**category_data.model_dump())
@@ -101,7 +107,7 @@ async def create_category(
     "/", response_model=SupplierProductResponse, status_code=status.HTTP_201_CREATED
 )
 async def create_product(
-    product_data: SupplierProductCreate, db: AsyncSession = Depends(get_db)
+    product_data: SupplierProductCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """Create a new supplier product"""
     product = SupplierProduct(**product_data.model_dump())
@@ -113,6 +119,7 @@ async def create_product(
 
 @router.get("/", response_model=List[SupplierProductResponse])
 async def list_products(
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     shop_id: Optional[UUID] = None,
     category_id: Optional[UUID] = None,
@@ -131,7 +138,8 @@ async def list_products(
     if status:
         query = query.where(SupplierProduct.status == status.value)
     if search:
-        query = query.where(SupplierProduct.title.ilike(f"%{search}%"))
+        escaped_search = search.replace("%", "\\%").replace("_", "\\_")
+        query = query.where(SupplierProduct.title.ilike(f"%{escaped_search}%"))
 
     query = (
         query.limit(limit).offset(offset).order_by(SupplierProduct.created_at.desc())
@@ -143,6 +151,7 @@ async def list_products(
 
 @router.get("/catalog", response_model=List[dict])
 async def browse_catalog(
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     category_id: Optional[UUID] = None,
     min_price: Optional[float] = None,
@@ -160,8 +169,9 @@ async def browse_catalog(
             SupplierProduct.category_id == category_id
         )
     if search:
+        escaped_search = search.replace("%", "\\%").replace("_", "\\_")
         query = query.join(SupplierProduct).where(
-            SupplierProduct.title.ilike(f"%{search}%")
+            SupplierProduct.title.ilike(f"%{escaped_search}%")
         )
 
     query = query.limit(limit).offset(offset)
@@ -204,7 +214,7 @@ async def browse_catalog(
 
 
 @router.get("/{product_id}", response_model=SupplierProductResponse)
-async def get_product(product_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_product(product_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Get product by ID"""
     result = await db.execute(
         select(SupplierProduct).where(SupplierProduct.id == product_id)
@@ -219,6 +229,7 @@ async def get_product(product_id: UUID, db: AsyncSession = Depends(get_db)):
 async def update_product(
     product_id: UUID,
     product_data: SupplierProductUpdate,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a product"""
@@ -239,7 +250,7 @@ async def update_product(
 
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db)):
+async def delete_product(product_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Delete a product (soft delete by setting status to archived)"""
     result = await db.execute(
         select(SupplierProduct).where(SupplierProduct.id == product_id)
@@ -256,7 +267,7 @@ async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{product_id}/variants", response_model=List[ProductVariantResponse])
-async def list_variants(product_id: UUID, db: AsyncSession = Depends(get_db)):
+async def list_variants(product_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """List variants for a product"""
     result = await db.execute(
         select(ProductVariant).where(ProductVariant.product_id == product_id)
@@ -270,7 +281,7 @@ async def list_variants(product_id: UUID, db: AsyncSession = Depends(get_db)):
     status_code=status.HTTP_201_CREATED,
 )
 async def create_variant(
-    product_id: UUID, variant_data: dict, db: AsyncSession = Depends(get_db)
+    product_id: UUID, variant_data: ProductVariantCreateRequest, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """Create a product variant"""
     product_result = await db.execute(
@@ -280,7 +291,7 @@ async def create_variant(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    variant = ProductVariant(product_id=product_id, **variant_data)
+    variant = ProductVariant(product_id=product_id, **variant_data.model_dump(exclude_unset=True))
     db.add(variant)
     await db.flush()
     await db.refresh(variant)
@@ -288,7 +299,7 @@ async def create_variant(
 
 
 @router.get("/variants/{variant_id}", response_model=ProductVariantResponse)
-async def get_variant(variant_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_variant(variant_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Get variant by ID"""
     result = await db.execute(
         select(ProductVariant).where(ProductVariant.id == variant_id)
@@ -303,7 +314,7 @@ async def get_variant(variant_id: UUID, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/variants/{variant_id}/supplier", response_model=SupplierVariantResponse)
-async def get_supplier_variant(variant_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_supplier_variant(variant_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Get supplier variant details (price, inventory)"""
     result = await db.execute(
         select(SupplierVariant).where(SupplierVariant.variant_id == variant_id)
@@ -323,7 +334,7 @@ async def get_supplier_variant(variant_id: UUID, db: AsyncSession = Depends(get_
     status_code=status.HTTP_201_CREATED,
 )
 async def create_listing(
-    listing_data: SellerListingCreate, shop_id: UUID, db: AsyncSession = Depends(get_db)
+    listing_data: SellerListingCreate, shop_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """Create a seller listing from a supplier product"""
     result = await db.execute(
@@ -360,7 +371,7 @@ async def create_listing(
 
 
 @router.get("/listings/{listing_id}", response_model=SellerListingResponse)
-async def get_listing(listing_id: UUID, db: AsyncSession = Depends(get_db)):
+async def get_listing(listing_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Get seller listing by ID"""
     result = await db.execute(
         select(SellerListing).where(SellerListing.id == listing_id)
@@ -375,6 +386,7 @@ async def get_listing(listing_id: UUID, db: AsyncSession = Depends(get_db)):
 async def update_listing(
     listing_id: UUID,
     listing_data: SellerListingUpdate,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Update a seller listing"""
@@ -395,7 +407,7 @@ async def update_listing(
 
 
 @router.delete("/listings/{listing_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_listing(listing_id: UUID, db: AsyncSession = Depends(get_db)):
+async def delete_listing(listing_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Delete a seller listing"""
     result = await db.execute(
         select(SellerListing).where(SellerListing.id == listing_id)
@@ -414,7 +426,7 @@ async def delete_listing(listing_id: UUID, db: AsyncSession = Depends(get_db)):
 @router.get(
     "/listings/{listing_id}/variants", response_model=List[SellerVariantResponse]
 )
-async def list_seller_variants(listing_id: UUID, db: AsyncSession = Depends(get_db)):
+async def list_seller_variants(listing_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """List seller variants for a listing"""
     result = await db.execute(
         select(SellerVariant).where(SellerVariant.listing_id == listing_id)
@@ -429,6 +441,7 @@ async def update_seller_variant(
     listing_id: UUID,
     variant_id: UUID,
     variant_data: SellerVariantBase,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Update seller variant price or enabled status"""
@@ -454,7 +467,7 @@ async def update_seller_variant(
 
 
 @router.get("/{product_id}/media", response_model=List[ProductMediaResponse])
-async def list_product_media(product_id: UUID, db: AsyncSession = Depends(get_db)):
+async def list_product_media(product_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """List media for a product"""
     result = await db.execute(
         select(ProductMedia)
@@ -470,7 +483,7 @@ async def list_product_media(product_id: UUID, db: AsyncSession = Depends(get_db
     status_code=status.HTTP_201_CREATED,
 )
 async def add_product_media(
-    product_id: UUID, media_data: ProductMediaBase, db: AsyncSession = Depends(get_db)
+    product_id: UUID, media_data: ProductMediaBase, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """Add media to a product"""
     product_result = await db.execute(
@@ -488,7 +501,7 @@ async def add_product_media(
 
 
 @router.delete("/media/{media_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_product_media(media_id: UUID, db: AsyncSession = Depends(get_db)):
+async def delete_product_media(media_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Delete product media"""
     result = await db.execute(select(ProductMedia).where(ProductMedia.id == media_id))
     media = result.scalar_one_or_none()

@@ -6,7 +6,7 @@ SQLAlchemy async configuration with PostgreSQL
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import Column, DateTime, Uuid, MetaData
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 from src.core.config import get_settings
@@ -43,28 +43,18 @@ async_session_maker = async_sessionmaker(
 
 class TimestampMixin:
     """Mixin for created_at and updated_at timestamps"""
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
 
 class UUIDMixin:
     """Mixin for UUID primary key"""
     id = Column(
         Uuid(as_uuid=True),
-        primary_key=True, 
+        primary_key=True,
         default=uuid.uuid4,
         nullable=False
     )
 
 
-async def get_db() -> AsyncSession:
-    """Dependency for FastAPI to get database session"""
-    async with async_session_maker() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+# NOTE: get_db dependency for FastAPI endpoints is in src/api/deps.py

@@ -10,18 +10,7 @@ from typing import Optional, List
 from decimal import Decimal
 from enum import Enum
 
-
-class OrderStatus(str, Enum):
-    PENDING = "pending"
-    CONFIRMED = "confirmed"
-    PAID = "paid"
-    PROCESSING = "processing"
-    SHIPPED = "shipped"
-    DELIVERED = "delivered"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
-    DISPUTED = "disputed"
-    REFUNDED = "refunded"
+from src.domains.orders.models import OrderStatus
 
 
 class ShipmentStatus(str, Enum):

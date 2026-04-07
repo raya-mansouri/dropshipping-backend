@@ -13,7 +13,7 @@ from src.api.deps import (
     verify_account_ownership,
     verify_shop_ownership,
 )
-from src.core.database import get_db
+from src.api.deps import get_db
 from src.core.repository.unit_of_work import UnitOfWork
 from src.domains.accounts.models import User
 from src.domains.accounts.repository.account import AccountRepository
