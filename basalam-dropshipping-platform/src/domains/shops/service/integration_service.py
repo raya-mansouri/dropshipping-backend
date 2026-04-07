@@ -9,7 +9,7 @@ Includes automatic webhook registration on connect and cleanup on disconnect.
 import asyncio
 import json
 import structlog
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from urllib.parse import quote
 import uuid
@@ -146,7 +146,7 @@ class IntegrationService:
                 update_data = {
                     "webhook_id": webhook_result.get("webhook_id"),
                     "webhook_status": "active",
-                    "webhook_registered_at": datetime.utcnow(),
+                    "webhook_registered_at": datetime.now(timezone.utc),
                     "status": "connected",
                 }
                 integration = await self._integration_repository.update(
@@ -891,7 +891,7 @@ class IntegrationService:
                 {
                     "webhook_secret_encrypted": new_secret_encrypted,
                     "webhook_previous_secret_encrypted": integration.webhook_secret_encrypted,
-                    "webhook_secret_rotated_at": datetime.utcnow(),
+                    "webhook_secret_rotated_at": datetime.now(timezone.utc),
                     "webhook_previous_secret_expires_at": old_secret_expires_at,
                 },
             )

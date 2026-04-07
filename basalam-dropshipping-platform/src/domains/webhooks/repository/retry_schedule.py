@@ -6,7 +6,7 @@ Repository for WebhookRetrySchedule model operations
 
 from typing import Optional, List
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -161,7 +161,7 @@ class WebhookRetryScheduleRepository:
             .where(WebhookRetrySchedule.id == id)
             .values(
                 status="executed",
-                executed_at=datetime.utcnow(),
+                executed_at=datetime.now(timezone.utc),
             )
         )
         await self.session.flush()

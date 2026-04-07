@@ -5,7 +5,7 @@ Business logic for system-wide logging and monitoring.
 """
 from typing import Optional, Dict, Any, List
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
@@ -35,7 +35,7 @@ class SystemLogService:
             "service": service,
             "message": message,
             "metadata": metadata or {},
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
         })
         logger.debug(
             "system_log_recorded",

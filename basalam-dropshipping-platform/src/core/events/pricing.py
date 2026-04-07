@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 from uuid import UUID, uuid4
 
@@ -18,7 +18,7 @@ class PriceUpdated(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="PriceUpdated",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.variant_id = variant_id
@@ -39,7 +39,7 @@ class MarginValidationFailed(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="MarginValidationFailed",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.listing_id = listing_id

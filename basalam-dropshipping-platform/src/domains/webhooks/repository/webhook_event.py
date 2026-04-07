@@ -6,7 +6,7 @@ Repository for WebhookEvent model operations
 
 from typing import Optional, List
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -149,7 +149,7 @@ class WebhookEventRepository:
         update_data = {"status": status.value}
 
         if status == WebhookEventStatus.COMPLETED:
-            update_data["processed_at"] = datetime.utcnow()
+            update_data["processed_at"] = datetime.now(timezone.utc)
 
         await self.session.execute(
             update(WebhookEvent).where(WebhookEvent.id == id).values(**update_data)
@@ -214,7 +214,7 @@ class WebhookEventRepository:
                 status=WebhookEventStatus.FAILED.value,
                 error_message=error_message,
                 error_trace=error_trace,
-                processed_at=datetime.utcnow(),
+                processed_at=datetime.now(timezone.utc),
             )
         )
         await self.session.flush()

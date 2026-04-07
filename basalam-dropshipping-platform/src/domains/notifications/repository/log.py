@@ -6,7 +6,7 @@ Repository for NotificationLog model operations
 
 from typing import Optional, List
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,7 +77,7 @@ class NotificationLogRepository:
         await self.session.execute(
             update(NotificationLog)
             .where(NotificationLog.id == id)
-            .values(status=NotificationStatus.SENT.value, sent_at=datetime.utcnow())
+            .values(status=NotificationStatus.SENT.value, sent_at=datetime.now(timezone.utc))
         )
         await self.session.flush()
         return await self.get_by_id(id)

@@ -5,7 +5,7 @@ Business logic for fraud signal detection and management.
 """
 from typing import Optional, Dict, Any, List
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
@@ -38,7 +38,7 @@ class FraudDetectionService:
             "severity": severity,
             "data": data or {},
             "status": "new",
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
         })
         logger.info(
             "fraud_signal_recorded",

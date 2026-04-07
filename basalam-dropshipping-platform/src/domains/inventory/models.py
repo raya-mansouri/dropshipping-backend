@@ -13,7 +13,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from src.core.database import Base, TimestampMixin, UUIDMixin
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 
 
@@ -68,7 +68,7 @@ class InventoryLog(Base, UUIDMixin):
     reason = Column(Text)
     extra_data = Column("metadata", JSONB, default=dict)
     
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     
     # Relationships
     variant = relationship("SupplierVariant", back_populates="inventory_logs")

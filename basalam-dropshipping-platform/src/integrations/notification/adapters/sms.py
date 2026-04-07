@@ -9,7 +9,7 @@ import asyncio
 
 import httpx
 import structlog
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 
 from ..ports import (
@@ -151,7 +151,7 @@ class KavenegarSMSAdapter(NotificationPort):
                     for phone in phones:
                         responses.append(NotificationResponse(
                             success=True,
-                            message_id=f"bulk_{datetime.utcnow().timestamp()}",
+                            message_id=f"bulk_{datetime.now(timezone.utc).timestamp()}",
                             provider=self.provider_name
                         ))
                 else:

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 from uuid import UUID, uuid4
 
@@ -18,7 +18,7 @@ class PaymentReceived(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="PaymentReceived",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.order_id = order_id
@@ -39,7 +39,7 @@ class PaymentToEscrow(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="PaymentToEscrow",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.order_id = order_id
@@ -60,7 +60,7 @@ class PaymentReleasedToSupplier(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="PaymentReleasedToSupplier",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.order_id = order_id
@@ -82,7 +82,7 @@ class RefundInitiated(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="RefundInitiated",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.payment_id = payment_id
@@ -104,7 +104,7 @@ class RefundCompleted(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="RefundCompleted",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.refund_id = refund_id

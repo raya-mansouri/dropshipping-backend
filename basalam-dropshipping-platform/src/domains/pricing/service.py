@@ -11,7 +11,7 @@ Handles:
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from uuid import UUID, uuid4
 from decimal import Decimal
@@ -235,7 +235,7 @@ class PricingService:
             "margin_percent": margin_percent,
             "margin_changed": "unchanged",
             "change_reason": "order_snapshot",
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
         })
 
         return price_history
@@ -294,7 +294,7 @@ class PricingService:
             "margin_percent": new_margin,
             "margin_changed": margin_changed,
             "change_reason": reason,
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
         })
 
         return price_history

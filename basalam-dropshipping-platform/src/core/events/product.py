@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 from uuid import UUID, uuid4
 
@@ -17,7 +17,7 @@ class ProductCreated(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="ProductCreated",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.product_id = product_id
@@ -36,7 +36,7 @@ class ProductUpdated(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="ProductUpdated",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.product_id = product_id
@@ -55,7 +55,7 @@ class ProductStatusChanged(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="ProductStatusChanged",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.product_id = product_id
@@ -75,7 +75,7 @@ class ProductForbid(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="ProductForbid",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.product_id = product_id
@@ -94,7 +94,7 @@ class ProductSynced(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="ProductSynced",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.product_id = product_id

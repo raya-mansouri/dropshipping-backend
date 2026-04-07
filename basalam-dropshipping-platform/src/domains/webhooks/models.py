@@ -13,7 +13,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from src.core.database import Base, TimestampMixin, UUIDMixin
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -83,7 +83,7 @@ class ProcessedEvent(Base):
     event_hash = Column(String(64))  # SHA256 of payload for dedup
     platform_id = Column(UUID(as_uuid=True), ForeignKey("platforms.id"), nullable=False)
     
-    processed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    processed_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     processed_by = Column(String(50), default="webhook_processor")
     
     __table_args__ = (

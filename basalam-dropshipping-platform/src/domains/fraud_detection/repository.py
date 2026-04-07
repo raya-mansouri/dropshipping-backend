@@ -5,6 +5,7 @@ Database access for fraud signal entries.
 """
 from typing import List, Optional
 from uuid import UUID
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -86,8 +87,7 @@ class FraudSignalRepository:
             return None
         signal.status = status
         if status in ("resolved", "false_positive"):
-            from datetime import datetime
-            signal.resolved_at = datetime.utcnow()
+            signal.resolved_at = datetime.now(timezone.utc)
         await self.session.flush()
         await self.session.refresh(signal)
         return signal

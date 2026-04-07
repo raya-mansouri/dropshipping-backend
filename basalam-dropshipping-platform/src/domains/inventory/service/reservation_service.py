@@ -7,7 +7,7 @@ Business logic for inventory reservations with deadlock detection and partial re
 import asyncio
 import structlog
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import uuid4
 
@@ -196,7 +196,7 @@ class ReservationService:
                 f"Insufficient inventory. Available: {available}, Requested: {quantity}"
             )
 
-        expires_at = datetime.utcnow() + timedelta(
+        expires_at = datetime.now(timezone.utc) + timedelta(
             minutes=expires_in_minutes or self.DEFAULT_RESERVATION_MINUTES
         )
 
@@ -328,7 +328,7 @@ class ReservationService:
                 )
             quantity = available
 
-        expires_at = datetime.utcnow() + timedelta(
+        expires_at = datetime.now(timezone.utc) + timedelta(
             minutes=expires_in_minutes or self.DEFAULT_RESERVATION_MINUTES
         )
 
@@ -404,7 +404,7 @@ class ReservationService:
                 .where(InventoryReservation.id == reservation.id)
                 .values(
                     status="released",
-                    released_at=datetime.utcnow(),
+                    released_at=datetime.now(timezone.utc),
                     released_reason=reason,
                 )
             )

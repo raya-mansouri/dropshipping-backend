@@ -5,7 +5,7 @@ This is the PRIMARY ADAPTER interface.
 All notification types (SMS, In-App, Webhook) implement this port.
 """
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, field_validator
@@ -75,7 +75,7 @@ class NotificationResponse(BaseModel):
     message_id: Optional[str] = None
     error: Optional[str] = None
     provider: str
-    sent_at: datetime = Field(default_factory=datetime.utcnow)
+    sent_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # ============================================

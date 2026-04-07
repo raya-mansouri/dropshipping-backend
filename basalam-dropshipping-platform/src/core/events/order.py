@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 from uuid import UUID, uuid4
 
@@ -18,7 +18,7 @@ class OrderCreated(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="OrderCreated",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.order_id = order_id
@@ -39,7 +39,7 @@ class OrderPaid(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="OrderPaid",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.order_id = order_id
@@ -59,7 +59,7 @@ class OrderCancelled(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="OrderCancelled",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.order_id = order_id
@@ -80,7 +80,7 @@ class OrderStatusChanged(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="OrderStatusChanged",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.order_id = order_id
@@ -102,7 +102,7 @@ class OrderShipped(DomainEvent):
         super().__init__(
             event_id=uuid4(),
             event_type="OrderShipped",
-            occurred_at=occurred_at or datetime.utcnow(),
+            occurred_at=occurred_at or datetime.now(timezone.utc),
             metadata=metadata,
         )
         self.order_id = order_id

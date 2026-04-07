@@ -6,7 +6,7 @@ Repository for InventoryReservation model operations
 
 from typing import Optional, List
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -92,7 +92,7 @@ class InventoryReservationRepository:
             select(InventoryReservation)
             .where(
                 InventoryReservation.status == "reserved",
-                InventoryReservation.expires_at < datetime.utcnow(),
+                InventoryReservation.expires_at < datetime.now(timezone.utc),
             )
             .order_by(InventoryReservation.expires_at.asc())
         )
@@ -129,7 +129,7 @@ class InventoryReservationRepository:
             .where(InventoryReservation.id == id)
             .values(
                 status="expired",
-                released_at=datetime.utcnow(),
+                released_at=datetime.now(timezone.utc),
                 released_reason="payment_timeout",
             )
         )

@@ -6,7 +6,7 @@ Handles page-based pagination, delta sync, and bulk upserts.
 
 import asyncio
 import structlog
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Tuple
 from uuid import UUID
 
@@ -174,7 +174,7 @@ class ProductSyncService:
 
             await self._update_sync_state(
                 sync_state,
-                last_sync_timestamp=datetime.utcnow(),
+                last_sync_timestamp=datetime.now(timezone.utc),
                 cursor_token=None,
                 created=result.created_count,
                 updated=result.updated_count,
@@ -498,7 +498,7 @@ class ProductSyncService:
             "has_variants": product.get("has_variants", False),
             "raw_payload": product.get("raw_payload"),
             "moderation_status": product.get("moderation_status"),
-            "last_synced_at": datetime.utcnow(),
+            "last_synced_at": datetime.now(timezone.utc),
         }
 
     def _prepare_variant_record(
@@ -549,7 +549,7 @@ class ProductSyncService:
                 "raw_payload": stmt.excluded.raw_payload,
                 "moderation_status": stmt.excluded.moderation_status,
                 "last_synced_at": stmt.excluded.last_synced_at,
-                "updated_at": datetime.utcnow(),
+                "updated_at": datetime.now(timezone.utc),
             },
         )
 
@@ -624,7 +624,7 @@ class ProductSyncService:
                 "inventory": stmt.excluded.inventory,
                 "status": stmt.excluded.status,
                 "raw_payload": stmt.excluded.raw_payload,
-                "updated_at": datetime.utcnow(),
+                "updated_at": datetime.now(timezone.utc),
             },
         )
 
@@ -655,7 +655,7 @@ class ProductSyncService:
                 status="forbidden",
                 basalam_validation_error={
                     "reason": error.reason or "forbidden_product",
-                    "detected_at": datetime.utcnow().isoformat(),
+                    "detected_at": datetime.now(timezone.utc).isoformat(),
                     "error_message": str(error),
                 },
             )

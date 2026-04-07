@@ -9,7 +9,7 @@ database (persistent storage) for webhook event deduplication.
 
 from typing import Optional
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -106,7 +106,7 @@ class ProcessedEventRepository:
         event = ProcessedEvent(**data)
 
         if not event.processed_at:
-            event.processed_at = datetime.utcnow()
+            event.processed_at = datetime.now(timezone.utc)
 
         if not event.processed_by:
             event.processed_by = "webhook_processor"

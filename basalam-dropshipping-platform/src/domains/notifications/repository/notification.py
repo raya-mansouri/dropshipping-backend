@@ -6,7 +6,7 @@ Repository for Notification model operations
 
 from typing import Optional, List
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,7 +59,7 @@ class NotificationRepository:
         await self.session.execute(
             update(Notification)
             .where(Notification.id == id)
-            .values(status=NotificationStatus.READ.value, read_at=datetime.utcnow())
+            .values(status=NotificationStatus.READ.value, read_at=datetime.now(timezone.utc))
         )
         await self.session.flush()
         return await self.get_by_id(id)
@@ -71,7 +71,7 @@ class NotificationRepository:
                 Notification.user_id == user_id,
                 Notification.status != NotificationStatus.READ.value,
             )
-            .values(status=NotificationStatus.READ.value, read_at=datetime.utcnow())
+            .values(status=NotificationStatus.READ.value, read_at=datetime.now(timezone.utc))
         )
         await self.session.flush()
         return result.rowcount

@@ -5,7 +5,7 @@ Business logic for recording and querying integration activity.
 """
 from typing import Optional, Dict, Any, List
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
@@ -39,7 +39,7 @@ class IntegrationLogService:
             "request_data": request_data or {},
             "response_data": response_data or {},
             "error_message": error_message,
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
         })
         if status == "failed":
             logger.warning(

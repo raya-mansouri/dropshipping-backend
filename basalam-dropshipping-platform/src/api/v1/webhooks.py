@@ -16,7 +16,7 @@ Security middleware chain (in order):
 import structlog
 import json
 import time as time_module
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from uuid import UUID
 
@@ -432,7 +432,7 @@ async def receive_webhook(
             "platform_id": platform.id,
             "integration_id": integration.id,
             "event_type": event_type,
-            "external_event_id": external_event_id or f"gen-{datetime.utcnow().timestamp()}",
+            "external_event_id": external_event_id or f"gen-{datetime.now(timezone.utc).timestamp()}",
             "payload": payload,
             "signature_verified": True,
             "status": "received",

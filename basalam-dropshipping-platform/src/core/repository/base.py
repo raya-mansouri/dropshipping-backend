@@ -1,6 +1,6 @@
 from typing import Generic, TypeVar, Optional, List, Dict, Any
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 
@@ -205,7 +205,7 @@ class BaseRepository(Generic[Model]):
         if instance is None:
             return False
 
-        setattr(instance, "deleted_at", datetime.utcnow())
+        setattr(instance, "deleted_at", datetime.now(timezone.utc))
         if hasattr(instance, "updated_by") and deleted_by:
             setattr(instance, "updated_by", deleted_by)
 

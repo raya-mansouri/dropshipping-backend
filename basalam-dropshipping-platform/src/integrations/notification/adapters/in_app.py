@@ -5,7 +5,7 @@ Implements NotificationPort for in-app notifications
 
 Stores notifications in database and provides via API
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 from typing import List, Optional, Dict, Any
 
@@ -55,7 +55,7 @@ class InAppNotificationAdapter(NotificationPort):
                 "action_url": request.content.action_url,
                 "status": "pending",
                 "channel": self.channel.value,
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat()
             }
             
             # In real implementation, save to database
@@ -66,7 +66,7 @@ class InAppNotificationAdapter(NotificationPort):
             
             return NotificationResponse(
                 success=True,
-                message_id=f"inapp_{datetime.utcnow().timestamp()}",
+                message_id=f"inapp_{datetime.now(timezone.utc).timestamp()}",
                 provider=self.provider_name
             )
             

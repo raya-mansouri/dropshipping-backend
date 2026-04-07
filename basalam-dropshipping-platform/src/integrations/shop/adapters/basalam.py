@@ -11,7 +11,7 @@ This is an ADAPTER in Hexagonal Architecture:
 import hashlib
 import hmac
 import structlog
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 
 import httpx
@@ -132,7 +132,7 @@ class BasalamConnectorAdapter(ShopConnectorPort):
                 data = response.json()
                 credentials.access_token = data["access_token"]
                 credentials.refresh_token = data["refresh_token"]
-                credentials.token_expires_at = datetime.utcnow() + timedelta(
+                credentials.token_expires_at = datetime.now(timezone.utc) + timedelta(
                     seconds=data.get("expires_in", 3600)
                 )
             

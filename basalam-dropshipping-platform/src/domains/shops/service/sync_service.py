@@ -6,7 +6,7 @@ Business logic for sync job management
 
 from typing import List, Optional, Dict, Any
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -100,7 +100,7 @@ class SyncService:
             "entity_id": entity_id,
             "status": "pending",
             "retry_count": "0",
-            "scheduled_at": datetime.utcnow(),
+            "scheduled_at": datetime.now(timezone.utc),
         }
 
         async with UnitOfWork(self.session):
@@ -130,7 +130,7 @@ class SyncService:
         await self._sync_repository.update_status(job_id, "running")
 
         job = await self._get_job_or_fail(job_id)
-        job.started_at = datetime.utcnow()
+        job.started_at = datetime.now(timezone.utc)
         await self.session.flush()
 
         try:
@@ -138,14 +138,14 @@ class SyncService:
 
             await self._sync_repository.update_status(job_id, "completed")
             job = await self._get_job_or_fail(job_id)
-            job.completed_at = datetime.utcnow()
+            job.completed_at = datetime.now(timezone.utc)
             await self.session.flush()
 
         except Exception as e:
             await self._sync_repository.update_status(job_id, "failed")
             job = await self._get_job_or_fail(job_id)
             job.error_message = str(e)
-            job.completed_at = datetime.utcnow()
+            job.completed_at = datetime.now(timezone.utc)
             await self.session.flush()
             raise
 
@@ -190,7 +190,7 @@ class SyncService:
         """
         await self._get_integration_or_fail(integration_id)
 
-        scheduled_at = schedule_time or datetime.utcnow()
+        scheduled_at = schedule_time or datetime.now(timezone.utc)
 
         job_data = {
             "integration_id": integration_id,
@@ -326,7 +326,7 @@ class SyncService:
 
             job = await self._get_job_or_fail(job_id)
             job.error_message = None
-            job.scheduled_at = datetime.utcnow()
+            job.scheduled_at = datetime.now(timezone.utc)
 
         return await self._get_job_or_fail(job_id)
 

@@ -14,7 +14,7 @@ Tasks:
 import hashlib
 import structlog
 from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import httpx
@@ -407,7 +407,7 @@ class ImageService:
     def _generate_key(self, hash_value: str, mime_type: str) -> str:
         """Generate unique storage key based on content hash"""
         ext = self._get_extension_from_mime(mime_type)
-        date_prefix = datetime.utcnow().strftime("%Y/%m/%d")
+        date_prefix = datetime.now(timezone.utc).strftime("%Y/%m/%d")
         return f"images/{date_prefix}/{hash_value[:2]}/{hash_value}.{ext}"
 
     def _get_extension_from_mime(self, mime_type: str) -> str:

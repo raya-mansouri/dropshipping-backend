@@ -6,7 +6,7 @@ Repository for Dispute model operations
 
 from typing import Optional, List
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -75,7 +75,7 @@ class DisputeRepository:
             "resolution": resolution,
             "outcome": outcome,
             "resolved_by": resolved_by,
-            "resolved_at": datetime.utcnow(),
+            "resolved_at": datetime.now(timezone.utc),
         }
         if outcome_amount is not None:
             data["outcome_amount"] = outcome_amount
