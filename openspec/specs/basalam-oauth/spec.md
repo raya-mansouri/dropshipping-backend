@@ -5,7 +5,7 @@ The system SHALL generate a valid Basalam OAuth 2.0 authorization URL using the 
 
 #### Scenario: Generate authorization URL for a shop
 - **WHEN** a shop owner requests to connect their Basalam shop via `POST /shops/{shop_id}/oauth/start`
-- **THEN** the system generates an authorization URL at `https://basalam.com/accounts/sso?client_id={CLIENT_ID}&scope=vendor.product.read+customer.order.read&redirect_uri={REDIRECT_URI}&state={RANDOM_STATE}&response_type=code`
+- **THEN** the system generates an authorization URL at `https://basalam.com/accounts/sso?client_id={CLIENT_ID}&scope=vendor.product.read+vendor.parcel.read+vendor.shipping.read&redirect_uri={REDIRECT_URI}&state={RANDOM_STATE}&response_type=code`
 - **AND** returns `{authorize_url, state, integration_id}` to the frontend
 
 #### Scenario: State parameter is unique and time-limited
