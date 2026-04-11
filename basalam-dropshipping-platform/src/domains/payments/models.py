@@ -53,10 +53,10 @@ class Payment(Base, UUIDMixin, TimestampMixin):
     status = Column(String(30), default=PaymentStatus.PENDING.value)
     
     # Timestamps
-    paid_at = Column(DateTime)
-    escrow_started_at = Column(DateTime)
-    supplier_paid_at = Column(DateTime)
-    refunded_at = Column(DateTime)
+    paid_at = Column(DateTime(timezone=True))
+    escrow_started_at = Column(DateTime(timezone=True))
+    supplier_paid_at = Column(DateTime(timezone=True))
+    refunded_at = Column(DateTime(timezone=True))
     
     # Failure
     failure_reason = Column(Text)
@@ -99,9 +99,9 @@ class Refund(Base, UUIDMixin, TimestampMixin):
     approved_by = Column(UUID(as_uuid=True))
     rejected_by = Column(UUID(as_uuid=True))
     
-    approved_at = Column(DateTime)
-    rejected_at = Column(DateTime)
-    completed_at = Column(DateTime)
+    approved_at = Column(DateTime(timezone=True))
+    rejected_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
     
     gateway_refund_id = Column(String(255))
     
@@ -127,15 +127,15 @@ class SupplierPayout(Base, UUIDMixin, TimestampMixin):
     
     # Release conditions
     release_conditions_met = Column(Boolean, default=False)
-    delivery_confirmed_at = Column(DateTime)
-    dispute_window_ends_at = Column(DateTime)
+    delivery_confirmed_at = Column(DateTime(timezone=True))
+    dispute_window_ends_at = Column(DateTime(timezone=True))
     
     # Payout details
     payout_method = Column(String(50))  # wallet, bank_transfer
     payout_reference = Column(String(255))
     
-    released_at = Column(DateTime)
-    failed_at = Column(DateTime)
+    released_at = Column(DateTime(timezone=True))
+    failed_at = Column(DateTime(timezone=True))
     failure_reason = Column(Text)
     
     # Relationships
@@ -162,7 +162,7 @@ class Dispute(Base, UUIDMixin, TimestampMixin):
     
     resolution = Column(Text)
     resolved_by = Column(UUID(as_uuid=True))
-    resolved_at = Column(DateTime)
+    resolved_at = Column(DateTime(timezone=True))
     
     # Dispute outcome
     outcome = Column(String(30))  # seller_wins, supplier_wins, partial, cancelled

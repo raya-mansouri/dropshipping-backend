@@ -32,8 +32,8 @@ class FraudSignal(Base, UUIDMixin, TimestampMixin):
         String(20), nullable=False
     )  # new, investigating, resolved, false_positive
 
-    created_at = Column(DateTime, nullable=False)
-    resolved_at = Column(DateTime)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    resolved_at = Column(DateTime(timezone=True))
 
     __table_args__ = (
         Index("idx_fraud_signals_entity", "entity_type", "entity_id"),

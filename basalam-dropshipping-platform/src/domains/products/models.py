@@ -61,9 +61,9 @@ class SupplierProduct(Base, UUIDMixin, TimestampMixin):
     raw_payload = Column(JSONB)  # Original data from Basalam
     moderation_status = Column(String(30))  # pending, approved, rejected
     
-    last_synced_at = Column(DateTime)
-    last_inventory_sync = Column(DateTime)
-    last_price_sync = Column(DateTime)
+    last_synced_at = Column(DateTime(timezone=True))
+    last_inventory_sync = Column(DateTime(timezone=True))
+    last_price_sync = Column(DateTime(timezone=True))
     
     # Relationships
     shop = relationship("Shop", back_populates="supplier_products")

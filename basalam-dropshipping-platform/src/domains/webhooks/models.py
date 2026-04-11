@@ -28,7 +28,7 @@ class WebhookEventLog(Base, UUIDMixin, TimestampMixin):
     platform_id = Column(String(100), nullable=False)
     event_id = Column(String(255), nullable=False)
     payload_hash = Column(String(64), nullable=True)
-    processed_at = Column(DateTime)
+    processed_at = Column(DateTime(timezone=True))
     extra_data = Column("metadata", JSONB, nullable=True)
 
     __table_args__ = (
@@ -73,8 +73,8 @@ class WebhookEvent(Base, UUIDMixin, TimestampMixin):
     error_message = Column(Text)
     error_trace = Column(Text)
     
-    processed_at = Column(DateTime)
-    
+    processed_at = Column(DateTime(timezone=True))
+
     # Event data extracted
     entity_type = Column(String(50))  # order, product, inventory
     entity_id = Column(String(255))  # External ID
@@ -104,7 +104,7 @@ class ProcessedEvent(Base):
     event_hash = Column(String(64))  # SHA256 of payload for dedup
     platform_id = Column(UUID(as_uuid=True), ForeignKey("platforms.id"), nullable=False)
     
-    processed_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    processed_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     processed_by = Column(String(50), default="webhook_processor")
     
     __table_args__ = (
@@ -123,9 +123,9 @@ class WebhookRetrySchedule(Base, UUIDMixin):
     webhook_event_id = Column(UUID(as_uuid=True), ForeignKey("webhook_events.id"), nullable=False)
     
     attempt = Column(Integer, nullable=False)
-    scheduled_at = Column(DateTime, nullable=False)
-    
-    executed_at = Column(DateTime)
+    scheduled_at = Column(DateTime(timezone=True), nullable=False)
+
+    executed_at = Column(DateTime(timezone=True))
     status = Column(String(20), default="pending")  # pending, executed, failed
     
     error = Column(Text)
@@ -193,8 +193,8 @@ class OutgoingWebhookLog(Base, UUIDMixin, TimestampMixin):
     retry_count = Column(Integer, default=0)
     max_retries = Column(Integer, default=5)
 
-    last_attempt_at = Column(DateTime)
-    next_retry_at = Column(DateTime)
+    last_attempt_at = Column(DateTime(timezone=True))
+    next_retry_at = Column(DateTime(timezone=True))
 
     last_error = Column(Text)
     response_status_code = Column(Integer)
@@ -224,7 +224,7 @@ class OutgoingWebhookDLQ(Base, UUIDMixin, TimestampMixin):
     failure_count = Column(Integer, default=0)
 
     status = Column(String(20), default="pending")  # pending, investigation, resolved
-    resolved_at = Column(DateTime)
+    resolved_at = Column(DateTime(timezone=True))
     resolved_by = Column(UUID(as_uuid=True))
     resolution_notes = Column(Text)
 

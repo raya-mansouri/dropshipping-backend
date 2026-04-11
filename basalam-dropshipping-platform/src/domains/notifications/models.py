@@ -49,7 +49,7 @@ class Notification(Base, UUIDMixin, TimestampMixin):
     
     status = Column(String(20), default=NotificationStatus.PENDING.value)
     
-    read_at = Column(DateTime)
+    read_at = Column(DateTime(timezone=True))
     read_by = Column(UUID(as_uuid=True))
     
     # Relationships
@@ -112,8 +112,8 @@ class NotificationLog(Base, UUIDMixin):
     error = Column(Text)
     error_code = Column(String(50))
     
-    sent_at = Column(DateTime)
-    delivered_at = Column(DateTime)
+    sent_at = Column(DateTime(timezone=True))
+    delivered_at = Column(DateTime(timezone=True))
     
     cost = Column(Integer, nullable=False)  # SMS cost etc.
     

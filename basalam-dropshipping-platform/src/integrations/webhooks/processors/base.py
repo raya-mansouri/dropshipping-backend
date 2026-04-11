@@ -166,7 +166,7 @@ class WebhookProcessor(ABC):
             except ValueError:
                 try:
                     ts = int(timestamp_str)
-                    return datetime.utcfromtimestamp(ts)
+                    return datetime.fromtimestamp(ts, tz=timezone.utc)
                 except (ValueError, OSError):
                     pass
 

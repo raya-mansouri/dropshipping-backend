@@ -31,9 +31,9 @@ class InventoryReservation(Base, UUIDMixin, TimestampMixin):
     quantity = Column(Integer, nullable=False)
     status = Column(String(20), default="reserved")  # reserved, released, consumed
     
-    expires_at = Column(DateTime, nullable=False)  # Reservation expires if not paid
-    
-    released_at = Column(DateTime)
+    expires_at = Column(DateTime(timezone=True), nullable=False)  # Reservation expires if not paid
+
+    released_at = Column(DateTime(timezone=True))
     released_reason = Column(String(50))  # payment_timeout, cancelled, manually_released
     
     # Relationships
@@ -68,7 +68,7 @@ class InventoryLog(Base, UUIDMixin):
     reason = Column(Text)
     extra_data = Column("metadata", JSONB, default=dict)
     
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     
     # Relationships
     variant = relationship("SupplierVariant", back_populates="inventory_logs")
@@ -95,8 +95,8 @@ class InventoryReconciliation(Base, UUIDMixin, TimestampMixin):
     mismatch_count = Column(Integer, default=0)
     fixed_count = Column(Integer, default=0)
     
-    started_at = Column(DateTime)
-    completed_at = Column(DateTime)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
     
     errors = Column(JSONB, default=list)
     details = Column(JSONB, default=list)  # List of mismatches

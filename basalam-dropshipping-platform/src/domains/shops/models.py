@@ -76,14 +76,14 @@ class ShopIntegration(Base, UUIDMixin, TimestampMixin):
     webhook_id = Column(String(255))  # Registered webhook ID on platform
     webhook_secret_encrypted = Column(String(512))  # Fernet-encrypted webhook secret
     webhook_status = Column(String(30), default="not_registered")  # active, inactive, not_registered, cleanup_failed
-    webhook_registered_at = Column(DateTime)
+    webhook_registered_at = Column(DateTime(timezone=True))
     webhook_previous_secret_encrypted = Column(String(512))  # Previous secret during rotation
-    webhook_secret_rotated_at = Column(DateTime)  # When rotation started
-    webhook_previous_secret_expires_at = Column(DateTime)  # When old secret stops being valid
+    webhook_secret_rotated_at = Column(DateTime(timezone=True))  # When rotation started
+    webhook_previous_secret_expires_at = Column(DateTime(timezone=True))  # When old secret stops being valid
     
     status = Column(String(20), default="connected")  # connected, disconnected, error
-    last_sync_started_at = Column(DateTime)
-    last_synced_at = Column(DateTime)
+    last_sync_started_at = Column(DateTime(timezone=True))
+    last_synced_at = Column(DateTime(timezone=True))
     last_error = Column(String(1000))
     
     # Relationships
@@ -117,9 +117,9 @@ class SyncJob(Base, UUIDMixin, TimestampMixin):
     retry_count = Column(Integer, default=0)
     error_message = Column(String(2000))
     
-    scheduled_at = Column(DateTime)
-    started_at = Column(DateTime)
-    completed_at = Column(DateTime)
+    scheduled_at = Column(DateTime(timezone=True))
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
     
     # Relationships
     integration = relationship("ShopIntegration", back_populates="sync_jobs")
@@ -139,7 +139,7 @@ class SyncState(Base, UUIDMixin, TimestampMixin):
     status = Column(String(20), default="idle")  # idle, syncing, error
     sync_mode = Column(String(20), default="full")  # full, delta
 
-    last_sync_timestamp = Column(DateTime)
+    last_sync_timestamp = Column(DateTime(timezone=True))
     cursor_token = Column(String(500))
 
     total_synced = Column(Integer, default=0)

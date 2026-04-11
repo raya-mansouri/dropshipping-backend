@@ -26,7 +26,7 @@ class SystemLog(Base, UUIDMixin, TimestampMixin):
     message = Column(Text, nullable=False)
     extra_data = Column("metadata", JSONB, default=dict)
 
-    created_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
         Index("idx_system_logs_level", "level"),

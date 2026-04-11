@@ -55,12 +55,12 @@ class Order(Base, UUIDMixin, TimestampMixin):
     extra_data = Column("metadata", JSONB, default=dict)
     
     # Timestamps
-    confirmed_at = Column(DateTime)
-    paid_at = Column(DateTime)
-    shipped_at = Column(DateTime)
-    delivered_at = Column(DateTime)
-    completed_at = Column(DateTime)
-    cancelled_at = Column(DateTime)
+    confirmed_at = Column(DateTime(timezone=True))
+    paid_at = Column(DateTime(timezone=True))
+    shipped_at = Column(DateTime(timezone=True))
+    delivered_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    cancelled_at = Column(DateTime(timezone=True))
     
     # Relationships
     shop = relationship("Shop", back_populates="orders")
@@ -103,7 +103,7 @@ class OrderItem(Base, UUIDMixin, TimestampMixin):
     
     # Rejection reason
     reject_reason = Column(String(255))
-    rejected_at = Column(DateTime)
+    rejected_at = Column(DateTime(timezone=True))
     
     # Relationships
     order = relationship("Order", back_populates="items")
@@ -141,7 +141,7 @@ class OrderHistory(Base, UUIDMixin):
     reason = Column(Text)
     extra_data = Column("metadata", JSONB, default=dict)
     
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
 class Shipment(Base, UUIDMixin, TimestampMixin):
@@ -162,15 +162,15 @@ class Shipment(Base, UUIDMixin, TimestampMixin):
     
     status = Column(String(30), default="pending")  # pending, label_created, shipped, in_transit, delivered, returned, cancelled
     
-    shipped_at = Column(DateTime)
-    delivered_at = Column(DateTime)
-    
+    shipped_at = Column(DateTime(timezone=True))
+    delivered_at = Column(DateTime(timezone=True))
+
     # Delivery confirmation
-    delivery_confirmed_at = Column(DateTime)
+    delivery_confirmed_at = Column(DateTime(timezone=True))
     delivery_confirmed_by = Column(String(20))  # carrier, customer, auto
     
-    estimated_delivery = Column(DateTime)
-    actual_delivery = Column(DateTime)
+    estimated_delivery = Column(DateTime(timezone=True))
+    actual_delivery = Column(DateTime(timezone=True))
     
     # Relationships
     order = relationship("Order", back_populates="shipments")
