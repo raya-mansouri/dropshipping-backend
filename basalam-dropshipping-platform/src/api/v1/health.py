@@ -41,20 +41,6 @@ async def check_database() -> DependencyHealth:
         return DependencyHealth(status="unhealthy", message=f"Database error: {str(e)}")
 
 
-async def get_redis_client():
-    """Get Redis client from environment"""
-    redis_url = get_settings().redis_url
-    try:
-        import redis.asyncio as redis
-
-        client = redis.from_url(redis_url, decode_responses=True)
-        yield client
-        await client.close()
-    except Exception as e:
-        logger.error("health_check_redis_unavailable", error=str(e), exc_info=True)
-        yield None
-
-
 async def check_redis(redis_client) -> DependencyHealth:
     """Check Redis connection"""
     try:
@@ -108,6 +94,7 @@ async def detailed_health_check():
         await redis_client.ping()
         redis_health = DependencyHealth(status="healthy", message="Redis connection OK")
     except Exception as e:
+        logger.error("redis_health_check_failed", error=str(e), exc_info=True)
         redis_health = DependencyHealth(
             status="unhealthy", message=f"Redis error: {str(e)}"
         )

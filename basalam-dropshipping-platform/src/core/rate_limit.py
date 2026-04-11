@@ -7,6 +7,9 @@ Uses in-memory counters (per-process). For multi-worker deployments,
 configure a reverse proxy (e.g., nginx) or use the Redis-backed
 RateLimiter in integrations/basalam/rate_limiter.py instead.
 """
+import asyncio
+import ipaddress
+import random
 import time
 import uuid
 import structlog
@@ -48,6 +51,7 @@ class RateLimitMiddleware:
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
+        self._lock = asyncio.Lock()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -72,11 +76,17 @@ class RateLimitMiddleware:
         # Use path prefix (strip dynamic segments) for rate limit key
         key = f"ratelimit:{client_id}:{self._path_prefix(path)}"
 
-        # Periodic cleanup of stale keys
-        self._cleanup_stale_keys()
+        # Periodic cleanup of stale keys (1% of requests)
+        if random.random() < 0.01:
+            self._cleanup_stale_keys()
 
         # Check rate limit
-        allowed = self._check_rate(key, limit)
+        try:
+            allowed = await self._check_rate(key, limit)
+        except Exception as e:
+            logger.error("rate_limit_check_failed", error=str(e), exc_info=True)
+            # Fail open: allow request through if rate limit check fails
+            allowed = True
         if not allowed:
             logger.warning("rate_limit_exceeded", client_id=client_id, path=path)
 
@@ -92,17 +102,26 @@ class RateLimitMiddleware:
     def _get_client_id(self, scope: Scope) -> str:
         """Extract client identifier from scope.
 
-        Uses X-Forwarded-For header (first IP) for reverse proxy setups,
-        or falls back to the direct client IP from the ASGI scope.
+        Only trusts X-Forwarded-For header when the direct connection comes
+        from a local/private address (i.e. a reverse proxy like nginx/traefik).
+        External clients cannot spoof the header to bypass rate limits.
         """
-        headers = dict(scope.get("headers", []))
-        forwarded = headers.get(b"x-forwarded-for", b"").decode()
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-
         client = scope.get("client")
-        if client:
-            return client[0]  # IP only, not port
+        direct_ip = client[0] if client else None
+
+        if direct_ip:
+            # Only trust X-Forwarded-For when the connection comes from
+            # a local or private address (reverse proxy)
+            try:
+                addr = ipaddress.ip_address(direct_ip)
+                if addr.is_private or addr.is_loopback:
+                    headers = dict(scope.get("headers", []))
+                    forwarded = headers.get(b"x-forwarded-for", b"").decode()
+                    if forwarded:
+                        return forwarded.split(",")[0].strip()
+            except ValueError:
+                pass
+            return direct_ip
 
         # Last resort: random per-request ID to avoid shared bucket
         logger.warning("rate_limit_no_client_id", path=scope.get("path", ""))
@@ -120,20 +139,21 @@ class RateLimitMiddleware:
             return "/".join(parts[:4])
         return "/".join(parts[:3])
 
-    def _check_rate(self, key: str, limit: int) -> bool:
-        """Fixed-window rate check (in-memory)."""
-        now = time.time()
-        window_start, count = _local_buckets[key]
+    async def _check_rate(self, key: str, limit: int) -> bool:
+        """Fixed-window rate check (in-memory) with lock for safety."""
+        async with self._lock:
+            now = time.time()
+            window_start, count = _local_buckets[key]
 
-        if now - window_start > WINDOW_SECONDS:
-            _local_buckets[key] = (now, 1)
+            if now - window_start > WINDOW_SECONDS:
+                _local_buckets[key] = (now, 1)
+                return True
+
+            if count >= limit:
+                return False
+
+            _local_buckets[key] = (window_start, count + 1)
             return True
-
-        if count >= limit:
-            return False
-
-        _local_buckets[key] = (window_start, count + 1)
-        return True
 
     def _cleanup_stale_keys(self) -> None:
         """Remove expired keys to prevent unbounded memory growth."""

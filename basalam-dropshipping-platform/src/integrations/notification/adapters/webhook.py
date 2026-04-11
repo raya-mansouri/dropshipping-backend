@@ -160,11 +160,20 @@ class WebhookNotificationAdapter(NotificationPort):
                     )
 
                     if log_id:
-                        await self._schedule_retry(
-                            log_id=log_id,
-                            error=error_msg,
-                            response_status_code=response.status_code,
-                        )
+                        try:
+                            await self._schedule_retry(
+                                log_id=log_id,
+                                error=error_msg,
+                                response_status_code=response.status_code,
+                            )
+                        except Exception as retry_err:
+                            logger.error(
+                                "failed_to_schedule_retry",
+                                log_id=log_id,
+                                retry_error=str(retry_err),
+                                original_error=error_msg,
+                                exc_info=True,
+                            )
 
                     return NotificationResponse(
                         success=False,
@@ -177,11 +186,20 @@ class WebhookNotificationAdapter(NotificationPort):
                     error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
 
                     if log_id:
-                        await self._move_to_dlq(
-                            log_id=log_id,
-                            failure_reason=error_msg,
-                            response_status_code=response.status_code,
-                        )
+                        try:
+                            await self._move_to_dlq(
+                                log_id=log_id,
+                                failure_reason=error_msg,
+                                response_status_code=response.status_code,
+                            )
+                        except Exception as dlq_err:
+                            logger.error(
+                                "failed_to_move_to_dlq",
+                                log_id=log_id,
+                                dlq_error=str(dlq_err),
+                                original_error=error_msg,
+                                exc_info=True,
+                            )
 
                     return NotificationResponse(
                         success=False,
@@ -193,10 +211,19 @@ class WebhookNotificationAdapter(NotificationPort):
             error_msg = f"Request timeout: {e}"
 
             if log_id:
-                await self._schedule_retry(
-                    log_id=log_id,
-                    error=error_msg,
-                )
+                try:
+                    await self._schedule_retry(
+                        log_id=log_id,
+                        error=error_msg,
+                    )
+                except Exception as retry_err:
+                    logger.error(
+                        "failed_to_schedule_retry",
+                        log_id=log_id,
+                        retry_error=str(retry_err),
+                        original_error=error_msg,
+                        exc_info=True,
+                    )
 
             return NotificationResponse(
                 success=False,
@@ -207,10 +234,19 @@ class WebhookNotificationAdapter(NotificationPort):
             error_msg = str(e)
 
             if log_id:
-                await self._schedule_retry(
-                    log_id=log_id,
-                    error=error_msg,
-                )
+                try:
+                    await self._schedule_retry(
+                        log_id=log_id,
+                        error=error_msg,
+                    )
+                except Exception as retry_err:
+                    logger.error(
+                        "failed_to_schedule_retry",
+                        log_id=log_id,
+                        retry_error=str(retry_err),
+                        original_error=error_msg,
+                        exc_info=True,
+                    )
 
             return NotificationResponse(
                 success=False,

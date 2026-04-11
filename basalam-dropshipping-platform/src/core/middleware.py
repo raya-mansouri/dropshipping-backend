@@ -53,7 +53,6 @@ class CorrelationIdMiddleware:
                 headers.append((b"x-request-id", request_id.encode()))
                 headers.append((b"x-content-type-options", b"nosniff"))
                 headers.append((b"x-frame-options", b"DENY"))
-                headers.append((b"x-xss-protection", b"1; mode=block"))
                 headers.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
                 message["headers"] = headers
             await send(message)
