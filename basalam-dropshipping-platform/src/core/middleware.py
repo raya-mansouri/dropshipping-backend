@@ -46,11 +46,15 @@ class CorrelationIdMiddleware:
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(request_id=request_id)
 
-        # Inject X-Request-ID into response headers
+        # Inject X-Request-ID and security headers into response headers
         async def send_with_request_id(message: Message) -> None:
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
                 headers.append((b"x-request-id", request_id.encode()))
+                headers.append((b"x-content-type-options", b"nosniff"))
+                headers.append((b"x-frame-options", b"DENY"))
+                headers.append((b"x-xss-protection", b"1; mode=block"))
+                headers.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
                 message["headers"] = headers
             await send(message)
 

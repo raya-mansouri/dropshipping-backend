@@ -3,16 +3,19 @@ from celery import Celery
 from src.core.config import get_settings
 
 REDIS_URL = get_settings().redis_url
+CELERY_BROKER_URL = get_settings().celery_broker_url or REDIS_URL
 
 celery_app = Celery("inventory_tasks")
 
 celery_app.conf.update(
-    broker_url=REDIS_URL,
+    broker_url=CELERY_BROKER_URL,
     result_backend=REDIS_URL,
     task_serializer="json",
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    task_soft_time_limit=300,  # 5 min soft limit — task receives SoftTimeLimitExceeded
+    task_time_limit=600,      # 10 min hard limit — worker process is terminated
     beat_schedule={
         "cleanup-expired-reservations": {
             "task": "src.workers.tasks.inventory_tasks.cleanup_expired_reservations",

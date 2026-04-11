@@ -17,6 +17,27 @@ from datetime import datetime, timezone
 from enum import Enum
 
 
+class WebhookEventLog(Base, UUIDMixin, TimestampMixin):
+    """
+    Event store log for domain events
+
+    Persisted copy of every domain event for replay and audit.
+    """
+    __tablename__ = "webhook_event_logs"
+
+    platform_id = Column(String(100), nullable=False)
+    event_id = Column(String(255), nullable=False)
+    payload_hash = Column(String(64), nullable=True)
+    processed_at = Column(DateTime)
+    extra_data = Column("metadata", JSONB, nullable=True)
+
+    __table_args__ = (
+        Index('ix_webhook_event_logs_platform', 'platform_id'),
+        Index('ix_webhook_event_logs_created', 'created_at'),
+        UniqueConstraint('platform_id', 'event_id', name='uq_webhook_event_logs_platform_event'),
+    )
+
+
 class WebhookEventStatus(str, Enum):
     """Webhook processing status"""
     RECEIVED = "received"

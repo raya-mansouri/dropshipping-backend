@@ -66,18 +66,15 @@ class EventStore:
         record = WebhookEventLog(
             platform_id="event_store",
             event_id=str(event.event_id),
-            payload_hash="",
+            payload_hash=None,
             processed_at=datetime.now(timezone.utc),
-            created_at=datetime.now(timezone.utc),
-            metadata=json.dumps(
-                {
-                    "event_type": event.event_type,
-                    "topic": topic,
-                    "partition": partition,
-                    "offset": offset,
-                    "occurred_at": event.occurred_at.isoformat(),
-                }
-            ),
+            extra_data={
+                "event_type": event.event_type,
+                "topic": topic,
+                "partition": partition,
+                "offset": offset,
+                "occurred_at": event.occurred_at.isoformat(),
+            },
         )
         self.session.add(record)
         await self.session.flush()
@@ -99,8 +96,8 @@ class EventStore:
 
         events = []
         for record in records:
-            if record.metadata:
-                metadata = json.loads(record.metadata)
+            if record.extra_data:
+                metadata = record.extra_data if isinstance(record.extra_data, dict) else json.loads(record.extra_data)
                 if event_type is None or metadata.get("event_type") == event_type:
                     events.append(
                         {
@@ -187,7 +184,13 @@ class EventPublisher:
                     offset=result["offset"],
                 )
             except Exception as e:
-                logger.warning("failed_to_save_event_to_store", error=str(e))
+                logger.error(
+                    "failed_to_save_event_to_store",
+                    event_id=str(event.event_id),
+                    topic=result.get("topic"),
+                    error=str(e),
+                    exc_info=True,
+                )
 
         logger.debug("published_event", event_id=str(event.event_id), topic=topic)
         return result

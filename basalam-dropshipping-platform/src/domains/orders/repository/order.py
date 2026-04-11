@@ -26,11 +26,12 @@ class OrderRepository:
         result = await self.session.execute(select(Order).where(Order.id == id))
         return result.scalar_one_or_none()
 
-    async def get_by_shop(self, shop_id: uuid.UUID) -> List[Order]:
+    async def get_by_shop(self, shop_id: uuid.UUID, limit: int = 100) -> List[Order]:
         result = await self.session.execute(
             select(Order)
             .where(Order.shop_id == shop_id)
             .order_by(Order.created_at.desc())
+            .limit(limit)
         )
         return list(result.scalars().all())
 
@@ -44,19 +45,21 @@ class OrderRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_by_status(self, status: OrderStatus) -> List[Order]:
+    async def get_by_status(self, status: OrderStatus, limit: int = 100) -> List[Order]:
         result = await self.session.execute(
             select(Order)
             .where(Order.status == status.value)
             .order_by(Order.created_at.desc())
+            .limit(limit)
         )
         return list(result.scalars().all())
 
-    async def get_pending_shipment(self) -> List[Order]:
+    async def get_pending_shipment(self, limit: int = 100) -> List[Order]:
         result = await self.session.execute(
             select(Order)
             .where(Order.status == OrderStatus.PAID.value)
             .order_by(Order.created_at.asc())
+            .limit(limit)
         )
         return list(result.scalars().all())
 

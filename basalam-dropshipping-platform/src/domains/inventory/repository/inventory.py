@@ -48,12 +48,13 @@ class InventoryRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_by_shop(self, shop_id: uuid.UUID) -> List[SupplierVariant]:
+    async def get_by_shop(self, shop_id: uuid.UUID, limit: int = 100) -> List[SupplierVariant]:
         """
         Get all inventory for a shop.
 
         Args:
             shop_id: Shop UUID
+            limit: Maximum number of records to return
 
         Returns:
             List of SupplierVariant instances with inventory for the shop
@@ -68,6 +69,7 @@ class InventoryRepository:
             )
             .where(SupplierProduct.shop_id == shop_id)
             .order_by(SupplierVariant.updated_at.desc())
+            .limit(limit)
         )
         return list(result.scalars().all())
 

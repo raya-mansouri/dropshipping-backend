@@ -9,9 +9,10 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone
 
-from src.api.deps import get_db, get_current_user
+from src.api.deps import get_db, get_current_user, check_shop_access, is_admin
 from src.domains.accounts.models import User
 from src.domains.orders.models import (
     Order,
@@ -32,6 +33,8 @@ from src.domains.orders.schemas import (
     OrderStatus as SchemaOrderStatus,
 )
 from src.domains.products.models import SupplierVariant, SellerVariant
+from src.domains.shops.models import Shop
+from src.domains.accounts.models import Account
 
 
 # ============================================
@@ -57,16 +60,40 @@ async def create_order(
 
     Validates inventory availability and creates order with items
     """
+    await check_shop_access(db, shop_id, current_user)
+
     total_price = 0
     order_items = []
 
-    for item_data in order_data.items:
-        result = await db.execute(
-            select(SupplierVariant).where(
-                SupplierVariant.variant_id == item_data.variant_id
+    # Batch-load all SupplierVariants in a single query
+    variant_ids = [item_data.variant_id for item_data in order_data.items]
+    sv_result = await db.execute(
+        select(SupplierVariant).where(SupplierVariant.variant_id.in_(variant_ids))
+    )
+    sv_rows = sv_result.scalars().all()
+    sv_map = {sv.variant_id: sv for sv in sv_rows}
+
+    # Batch-load all SellerVariants that have a seller_listing_id
+    listing_ids = [
+        item_data.seller_listing_id
+        for item_data in order_data.items
+        if item_data.seller_listing_id
+    ]
+    sellv_map: dict = {}
+    if listing_ids:
+        # Collect supplier_variant_ids for the IN clause
+        supplier_variant_ids = [sv.id for sv in sv_rows]
+        sellv_result = await db.execute(
+            select(SellerVariant).where(
+                SellerVariant.listing_id.in_(listing_ids),
+                SellerVariant.supplier_variant_id.in_(supplier_variant_ids),
             )
         )
-        supplier_variant = result.scalar_one_or_none()
+        for sellv in sellv_result.scalars().all():
+            sellv_map[(sellv.listing_id, sellv.supplier_variant_id)] = sellv
+
+    for item_data in order_data.items:
+        supplier_variant = sv_map.get(item_data.variant_id)
         if not supplier_variant:
             raise HTTPException(
                 status_code=404, detail=f"Variant {item_data.variant_id} not found"
@@ -78,15 +105,10 @@ async def create_order(
                 detail=f"Insufficient inventory for variant {item_data.variant_id}",
             )
 
-        seller_result = None
         if item_data.seller_listing_id:
-            seller_result = await db.execute(
-                select(SellerVariant).where(
-                    SellerVariant.listing_id == item_data.seller_listing_id,
-                    SellerVariant.supplier_variant_id == supplier_variant.id,
-                )
+            seller_variant = sellv_map.get(
+                (item_data.seller_listing_id, supplier_variant.id)
             )
-            seller_variant = seller_result.scalar_one_or_none()
             seller_price = (
                 seller_variant.price if seller_variant else supplier_variant.cost_price
             )
@@ -144,11 +166,22 @@ async def list_orders(
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
 ):
-    """List orders with filters"""
+    """List orders with filters. Scoped to user's shops unless admin."""
+    if shop_id:
+        await check_shop_access(db, shop_id, current_user)
+
     query = select(Order)
 
     if shop_id:
         query = query.where(Order.shop_id == shop_id)
+    elif not is_admin(current_user):
+        # Scope to orders belonging to user's shops
+        user_shops = (
+            select(Shop.id)
+            .join(Account, Shop.account_id == Account.id)
+            .where(Account.owner_user_id == current_user.id)
+        )
+        query = query.where(Order.shop_id.in_(user_shops))
     if status:
         query = query.where(Order.status == status.value)
 
@@ -161,10 +194,15 @@ async def list_orders(
 @router.get("/{order_id}", response_model=OrderResponse)
 async def get_order(order_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Get order by ID"""
-    result = await db.execute(select(Order).where(Order.id == order_id))
+    result = await db.execute(
+        select(Order)
+        .where(Order.id == order_id)
+        .options(selectinload(Order.items))
+    )
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    await check_shop_access(db, order.shop_id, current_user)
     return order
 
 
@@ -178,6 +216,7 @@ async def update_order(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    await check_shop_access(db, order.shop_id, current_user)
 
     update_dict = order_data.model_dump(exclude_unset=True)
 
@@ -221,6 +260,7 @@ async def cancel_order(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    await check_shop_access(db, order.shop_id, current_user)
 
     cancellable_statuses = [
         ModelOrderStatus.PENDING.value,
@@ -258,8 +298,10 @@ async def cancel_order(
 async def list_order_items(order_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """List items for an order"""
     order_result = await db.execute(select(Order).where(Order.id == order_id))
-    if not order_result.scalar_one_or_none():
+    order = order_result.scalar_one_or_none()
+    if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    await check_shop_access(db, order.shop_id, current_user)
 
     result = await db.execute(select(OrderItem).where(OrderItem.order_id == order_id))
     return result.scalars().all()
@@ -272,6 +314,12 @@ async def get_order_item(item_id: UUID, db: AsyncSession = Depends(get_db), curr
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Order item not found")
+    # Verify ownership via the order's shop — parent must exist
+    order_result = await db.execute(select(Order).where(Order.id == item.order_id))
+    order = order_result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Parent order not found")
+    await check_shop_access(db, order.shop_id, current_user)
     return item
 
 
@@ -282,8 +330,10 @@ async def get_order_item(item_id: UUID, db: AsyncSession = Depends(get_db), curr
 async def list_order_history(order_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Get order status history"""
     order_result = await db.execute(select(Order).where(Order.id == order_id))
-    if not order_result.scalar_one_or_none():
+    order = order_result.scalar_one_or_none()
+    if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    await check_shop_access(db, order.shop_id, current_user)
 
     result = await db.execute(
         select(OrderHistory)
@@ -300,8 +350,10 @@ async def list_order_history(order_id: UUID, db: AsyncSession = Depends(get_db),
 async def list_shipments(order_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """List shipments for an order"""
     order_result = await db.execute(select(Order).where(Order.id == order_id))
-    if not order_result.scalar_one_or_none():
+    order = order_result.scalar_one_or_none()
+    if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    await check_shop_access(db, order.shop_id, current_user)
 
     result = await db.execute(select(Shipment).where(Shipment.order_id == order_id))
     return result.scalars().all()
@@ -314,6 +366,12 @@ async def get_shipment(shipment_id: UUID, db: AsyncSession = Depends(get_db), cu
     shipment = result.scalar_one_or_none()
     if not shipment:
         raise HTTPException(status_code=404, detail="Shipment not found")
+    # Verify ownership via the order's shop — parent must exist
+    order_result = await db.execute(select(Order).where(Order.id == shipment.order_id))
+    order = order_result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Parent order not found")
+    await check_shop_access(db, order.shop_id, current_user)
     return shipment
 
 
@@ -329,6 +387,12 @@ async def confirm_delivery(
     shipment = result.scalar_one_or_none()
     if not shipment:
         raise HTTPException(status_code=404, detail="Shipment not found")
+    # Verify ownership via the order's shop — parent must exist
+    order_result = await db.execute(select(Order).where(Order.id == shipment.order_id))
+    order = order_result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Parent order not found")
+    await check_shop_access(db, order.shop_id, current_user)
 
     shipment.delivery_confirmed_at = datetime.now(timezone.utc)
     shipment.delivery_confirmed_by = confirm_data.confirmed_by
@@ -348,6 +412,7 @@ async def confirm_order(order_id: UUID, db: AsyncSession = Depends(get_db), curr
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    await check_shop_access(db, order.shop_id, current_user)
 
     if order.status != ModelOrderStatus.PENDING.value:
         raise HTTPException(
@@ -379,6 +444,7 @@ async def mark_order_paid(order_id: UUID, db: AsyncSession = Depends(get_db), cu
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    await check_shop_access(db, order.shop_id, current_user)
 
     if order.status != ModelOrderStatus.CONFIRMED.value:
         raise HTTPException(
@@ -412,10 +478,15 @@ async def mark_order_shipped(
     current_user: User = Depends(get_current_user),
 ):
     """Mark order as shipped"""
-    result = await db.execute(select(Order).where(Order.id == order_id))
+    result = await db.execute(
+        select(Order)
+        .where(Order.id == order_id)
+        .options(selectinload(Order.items))
+    )
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    await check_shop_access(db, order.shop_id, current_user)
 
     if order.status != ModelOrderStatus.PAID.value:
         raise HTTPException(
@@ -459,6 +530,7 @@ async def mark_order_delivered(order_id: UUID, db: AsyncSession = Depends(get_db
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    await check_shop_access(db, order.shop_id, current_user)
 
     if order.status != ModelOrderStatus.SHIPPED.value:
         raise HTTPException(
@@ -490,6 +562,7 @@ async def complete_order(order_id: UUID, db: AsyncSession = Depends(get_db), cur
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    await check_shop_access(db, order.shop_id, current_user)
 
     if order.status != ModelOrderStatus.DELIVERED.value:
         raise HTTPException(

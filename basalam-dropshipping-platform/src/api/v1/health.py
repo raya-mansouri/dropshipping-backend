@@ -4,8 +4,10 @@ Health Check API Endpoints
 FastAPI endpoints for monitoring service health
 """
 
+import structlog
 from typing import Dict, Any
-from fastapi import APIRouter, Depends, status
+
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -13,6 +15,7 @@ from src.core.config import get_settings
 from src.core.database import async_session_maker
 from src.core.events.publisher import EventPublisher
 
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/health", tags=["Health Check"])
 
@@ -34,6 +37,7 @@ async def check_database() -> DependencyHealth:
             await session.execute(text("SELECT 1"))
         return DependencyHealth(status="healthy", message="Database connection OK")
     except Exception as e:
+        logger.error("database_health_check_failed", error=str(e), exc_info=True)
         return DependencyHealth(status="unhealthy", message=f"Database error: {str(e)}")
 
 
@@ -47,6 +51,7 @@ async def get_redis_client():
         yield client
         await client.close()
     except Exception as e:
+        logger.error("health_check_redis_unavailable", error=str(e), exc_info=True)
         yield None
 
 
@@ -113,9 +118,9 @@ async def detailed_health_check():
     kafka_health = await check_kafka()
 
     dependencies = {
-        "database": db_health.dict(),
-        "redis": redis_health.dict(),
-        "kafka": kafka_health.dict(),
+        "database": db_health.model_dump(),
+        "redis": redis_health.model_dump(),
+        "kafka": kafka_health.model_dump(),
     }
 
     all_healthy = all(dep["status"] == "healthy" for dep in dependencies.values())
@@ -136,5 +141,8 @@ async def readiness():
     """Readiness probe - indicates if service can handle requests"""
     db_health = await check_database()
     if db_health.status != "healthy":
-        raise Exception("Database not ready")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not ready",
+        )
     return {"status": "ready"}

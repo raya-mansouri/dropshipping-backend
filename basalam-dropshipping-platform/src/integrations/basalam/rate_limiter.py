@@ -46,6 +46,11 @@ end
 """
 
 
+class RateLimitWaitExceeded(Exception):
+    """Raised when rate limit wait exceeds the configured maximum."""
+    pass
+
+
 class RateLimiter:
     DEFAULT_ENDPOINT_LIMITS = {
         "products": {"rate": 100, "period": 60},
@@ -96,9 +101,16 @@ class RateLimiter:
         remaining = result[0]
         return remaining >= 0
 
-    async def wait_if_needed(self, endpoint: str, rate: int = None, period: int = None):
+    async def wait_if_needed(
+        self, endpoint: str, rate: int = None, period: int = None, max_wait: float = 60.0
+    ):
+        """Wait until rate limit allows the request, with a maximum wait time."""
+        waited = 0.0
         while not await self.check_limit(endpoint, rate, period):
+            if waited >= max_wait:
+                raise RateLimitWaitExceeded(f"Rate limit wait exceeded {max_wait}s for {endpoint}")
             await asyncio.sleep(0.1)
+            waited += 0.1
 
     async def get_remaining(self, endpoint: str) -> int:
         key = self._get_bucket_key(endpoint)
@@ -147,5 +159,11 @@ class RateLimiter:
                         limit=parsed_limit,
                         reset=parsed_reset,
                     )
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                logger.debug(
+                    "rate_limit_header_parse_failed",
+                    endpoint=endpoint,
+                    limit_header=limit,
+                    reset_header=reset,
+                    error=str(e),
+                )

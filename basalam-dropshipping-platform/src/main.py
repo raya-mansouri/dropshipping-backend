@@ -11,19 +11,23 @@ from contextlib import asynccontextmanager
 
 from alembic import command
 from alembic.config import Config
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
+from prometheus_client import generate_latest
 
+from src.api.deps import require_admin
 from src.api.v1 import auth, orders, products, shops, health
 from src.api.v1 import webhooks, webhook_health, admin
 from src.core.config import get_settings
 from src.core.events.publisher import EventPublisher
 from src.core.logging import configure_logging
 from src.core.middleware import CorrelationIdMiddleware
+from src.core.metrics import get_metrics_registry
+from src.core.rate_limit import RateLimitMiddleware
 
 configure_logging()
 logger = structlog.get_logger(__name__)
@@ -64,6 +68,7 @@ app = FastAPI(
     redoc_url=None if DOCS_OFFLINE else "/redoc",
 )
 
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -179,3 +184,12 @@ async def root():
 async def ping():
     """Simple ping endpoint"""
     return {"pong": True}
+
+
+@app.get("/metrics")
+async def metrics(current_user=Depends(require_admin)):
+    """Prometheus metrics endpoint. Requires admin authentication."""
+    return Response(
+        content=generate_latest(get_metrics_registry()),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )

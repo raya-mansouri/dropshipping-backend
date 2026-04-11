@@ -31,7 +31,9 @@ engine = create_async_engine(
     echo=False,
     pool_pre_ping=True,
     pool_size=20,
-    max_overflow=40
+    max_overflow=40,
+    pool_recycle=1800,  # Recycle connections before PostgreSQL idle timeout (30 min)
+    pool_timeout=30,    # Max seconds to wait for a connection from pool
 )
 
 async_session_maker = async_sessionmaker(
@@ -42,9 +44,13 @@ async_session_maker = async_sessionmaker(
 
 
 class TimestampMixin:
-    """Mixin for created_at and updated_at timestamps"""
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    """Mixin for created_at and updated_at timestamps.
+
+    Uses PostgreSQL TIMESTAMP WITH TIME ZONE columns.
+    All values are timezone-aware UTC via datetime.now(timezone.utc).
+    """
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
 
 class UUIDMixin:

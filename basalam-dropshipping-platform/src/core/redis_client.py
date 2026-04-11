@@ -21,4 +21,8 @@ def get_redis_client() -> redis.Redis:
     The client is reused across calls within the same process.
     """
     settings = get_settings()
-    return redis.from_url(settings.redis_url, decode_responses=True)
+    return redis.from_url(
+        settings.redis_url,
+        decode_responses=True,
+        max_connections=50,
+    )

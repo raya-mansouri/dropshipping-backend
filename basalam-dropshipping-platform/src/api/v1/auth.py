@@ -7,6 +7,7 @@ FastAPI endpoints for authentication and user management
 from uuid import UUID
 from typing import Optional
 from datetime import datetime, timedelta, timezone
+from jose import jwt
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -14,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 import structlog
-from passlib.context import CryptContext
+import bcrypt as _bcrypt
 
 from src.api.deps import get_db, get_current_user, decode_token
 from src.core.config import get_settings
@@ -46,7 +47,6 @@ ALGORITHM = get_settings().jwt_algorithm
 ACCESS_TOKEN_EXPIRE_MINUTES = get_settings().access_token_expire_minutes
 REFRESH_TOKEN_EXPIRE_DAYS = get_settings().refresh_token_expire_days
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 logger = structlog.get_logger(__name__)
 
 
@@ -56,18 +56,22 @@ logger = structlog.get_logger(__name__)
 
 
 def hash_password(password: str) -> str:
-    """Hash password using bcrypt"""
-    return pwd_context.hash(password)
+    """Hash password using bcrypt directly"""
+    return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify password against bcrypt hash"""
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify password against bcrypt hash. Returns False for invalid hashes."""
+    try:
+        return _bcrypt.checkpw(
+            plain_password.encode("utf-8"), hashed_password.encode("utf-8")
+        )
+    except (ValueError, TypeError):
+        return False
 
 
 def create_access_token(user_id: UUID) -> str:
     """Create JWT access token"""
-    import jwt
 
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {"sub": str(user_id), "type": "access", "exp": expire}
@@ -76,7 +80,6 @@ def create_access_token(user_id: UUID) -> str:
 
 def create_refresh_token(user_id: UUID) -> str:
     """Create JWT refresh token"""
-    import jwt
 
     expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     payload = {"sub": str(user_id), "type": "refresh", "exp": expire}
@@ -346,7 +349,6 @@ async def forgot_password(
     user = result.scalar_one_or_none()
 
     if user:
-        import jwt as jwt_module
 
         # Create a short-lived reset token (10 minutes)
         reset_expire = datetime.now(timezone.utc) + timedelta(minutes=10)
@@ -356,7 +358,7 @@ async def forgot_password(
             "type": "password_reset",
             "exp": reset_expire,
         }
-        _reset_token = jwt_module.encode(  # noqa: F841 — TODO: send via SMS
+        _reset_token = jwt.encode(  # noqa: F841 — TODO: send via SMS
             reset_payload, SECRET_KEY, algorithm=ALGORITHM
         )
         # In production: send SMS with reset code to phone number

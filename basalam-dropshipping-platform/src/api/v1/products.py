@@ -7,12 +7,15 @@ FastAPI endpoints for product management
 from uuid import UUID
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
-from src.api.deps import get_db, get_current_user
+from src.api.deps import get_db, get_current_user, check_shop_access, is_admin
 from src.domains.accounts.models import User
+from src.domains.shops.models import Shop
+from src.domains.accounts.models import Account
 from src.domains.products.models import (
     SupplierProduct,
     ProductVariant,
@@ -46,6 +49,12 @@ class ProductVariantCreateRequest(BaseModel):
     sku: Optional[str] = None
     external_variant_id: Optional[str] = None
     attributes: Optional[dict] = None
+
+    @model_validator(mode='after')
+    def check_at_least_one_id(self):
+        if not self.sku and not self.external_variant_id:
+            raise ValueError('At least one of sku or external_variant_id is required')
+        return self
 
 
 # ============================================
@@ -110,6 +119,7 @@ async def create_product(
     product_data: SupplierProductCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """Create a new supplier product"""
+    await check_shop_access(db, product_data.shop_id, current_user)
     product = SupplierProduct(**product_data.model_dump())
     db.add(product)
     await db.flush()
@@ -128,11 +138,22 @@ async def list_products(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
-    """List supplier products with filters"""
+    """List supplier products with filters. Scoped to user's shops unless admin."""
+    if shop_id:
+        await check_shop_access(db, shop_id, current_user)
+
     query = select(SupplierProduct)
 
     if shop_id:
         query = query.where(SupplierProduct.shop_id == shop_id)
+    elif not is_admin(current_user):
+        # Scope to products belonging to user's shops
+        user_shops = (
+            select(Shop.id)
+            .join(Account, Shop.account_id == Account.id)
+            .where(Account.owner_user_id == current_user.id)
+        )
+        query = query.where(SupplierProduct.shop_id.in_(user_shops))
     if category_id:
         query = query.where(SupplierProduct.category_id == category_id)
     if status:
@@ -162,7 +183,14 @@ async def browse_catalog(
     offset: int = Query(0, ge=0),
 ):
     """Browse product catalog (for sellers)"""
-    query = select(SellerListing).where(SellerListing.status == "active")
+    query = (
+        select(SellerListing)
+        .where(SellerListing.status == "active")
+        .options(
+            selectinload(SellerListing.supplier_product),
+            selectinload(SellerListing.variants),
+        )
+    )
 
     if category_id:
         query = query.join(SupplierProduct).where(
@@ -215,9 +243,15 @@ async def browse_catalog(
 
 @router.get("/{product_id}", response_model=SupplierProductResponse)
 async def get_product(product_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """Get product by ID"""
+    """Get product by ID (requires authentication, not ownership)"""
     result = await db.execute(
-        select(SupplierProduct).where(SupplierProduct.id == product_id)
+        select(SupplierProduct)
+        .where(SupplierProduct.id == product_id)
+        .options(
+            selectinload(SupplierProduct.variants),
+            selectinload(SupplierProduct.images),
+            selectinload(SupplierProduct.seller_listings),
+        )
     )
     product = result.scalar_one_or_none()
     if not product:
@@ -239,6 +273,7 @@ async def update_product(
     product = result.scalar_one_or_none()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    await check_shop_access(db, product.shop_id, current_user)
 
     update_dict = product_data.model_dump(exclude_unset=True)
     for field, value in update_dict.items():
@@ -258,6 +293,7 @@ async def delete_product(product_id: UUID, current_user: User = Depends(get_curr
     product = result.scalar_one_or_none()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    await check_shop_access(db, product.shop_id, current_user)
 
     product.status = ProductStatus.ARCHIVED.value
     await db.flush()
@@ -269,6 +305,14 @@ async def delete_product(product_id: UUID, current_user: User = Depends(get_curr
 @router.get("/{product_id}/variants", response_model=List[ProductVariantResponse])
 async def list_variants(product_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """List variants for a product"""
+    product_result = await db.execute(
+        select(SupplierProduct).where(SupplierProduct.id == product_id)
+    )
+    product = product_result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    await check_shop_access(db, product.shop_id, current_user)
+
     result = await db.execute(
         select(ProductVariant).where(ProductVariant.product_id == product_id)
     )
@@ -290,6 +334,7 @@ async def create_variant(
     product = product_result.scalar_one_or_none()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    await check_shop_access(db, product.shop_id, current_user)
 
     variant = ProductVariant(product_id=product_id, **variant_data.model_dump(exclude_unset=True))
     db.add(variant)
@@ -307,6 +352,14 @@ async def get_variant(variant_id: UUID, current_user: User = Depends(get_current
     variant = result.scalar_one_or_none()
     if not variant:
         raise HTTPException(status_code=404, detail="Variant not found")
+    # Verify ownership via the parent product — parent must exist
+    product_result = await db.execute(
+        select(SupplierProduct).where(SupplierProduct.id == variant.product_id)
+    )
+    product = product_result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Parent product not found")
+    await check_shop_access(db, product.shop_id, current_user)
     return variant
 
 
@@ -322,6 +375,14 @@ async def get_supplier_variant(variant_id: UUID, current_user: User = Depends(ge
     variant = result.scalar_one_or_none()
     if not variant:
         raise HTTPException(status_code=404, detail="Supplier variant not found")
+    # Verify ownership via the parent product — parent must exist
+    product_result = await db.execute(
+        select(SupplierProduct).where(SupplierProduct.id == variant.supplier_product_id)
+    )
+    product = product_result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Parent product not found")
+    await check_shop_access(db, product.shop_id, current_user)
     return variant
 
 
@@ -337,6 +398,8 @@ async def create_listing(
     listing_data: SellerListingCreate, shop_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """Create a seller listing from a supplier product"""
+    await check_shop_access(db, shop_id, current_user)
+
     result = await db.execute(
         select(SupplierProduct).where(
             SupplierProduct.id == listing_data.supplier_product_id
@@ -379,6 +442,7 @@ async def get_listing(listing_id: UUID, current_user: User = Depends(get_current
     listing = result.scalar_one_or_none()
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
+    await check_shop_access(db, listing.shop_id, current_user)
     return listing
 
 
@@ -396,6 +460,7 @@ async def update_listing(
     listing = result.scalar_one_or_none()
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
+    await check_shop_access(db, listing.shop_id, current_user)
 
     update_dict = listing_data.model_dump(exclude_unset=True)
     for field, value in update_dict.items():
@@ -415,6 +480,7 @@ async def delete_listing(listing_id: UUID, current_user: User = Depends(get_curr
     listing = result.scalar_one_or_none()
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
+    await check_shop_access(db, listing.shop_id, current_user)
 
     listing.status = "disabled"
     await db.flush()
@@ -428,6 +494,14 @@ async def delete_listing(listing_id: UUID, current_user: User = Depends(get_curr
 )
 async def list_seller_variants(listing_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """List seller variants for a listing"""
+    listing_result = await db.execute(
+        select(SellerListing).where(SellerListing.id == listing_id)
+    )
+    listing = listing_result.scalar_one_or_none()
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    await check_shop_access(db, listing.shop_id, current_user)
+
     result = await db.execute(
         select(SellerVariant).where(SellerVariant.listing_id == listing_id)
     )
@@ -445,6 +519,15 @@ async def update_seller_variant(
     db: AsyncSession = Depends(get_db),
 ):
     """Update seller variant price or enabled status"""
+    # First verify the listing belongs to the user
+    listing_result = await db.execute(
+        select(SellerListing).where(SellerListing.id == listing_id)
+    )
+    listing = listing_result.scalar_one_or_none()
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    await check_shop_access(db, listing.shop_id, current_user)
+
     result = await db.execute(
         select(SellerVariant).where(
             SellerVariant.id == variant_id, SellerVariant.listing_id == listing_id
@@ -469,6 +552,14 @@ async def update_seller_variant(
 @router.get("/{product_id}/media", response_model=List[ProductMediaResponse])
 async def list_product_media(product_id: UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """List media for a product"""
+    product_result = await db.execute(
+        select(SupplierProduct).where(SupplierProduct.id == product_id)
+    )
+    product = product_result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    await check_shop_access(db, product.shop_id, current_user)
+
     result = await db.execute(
         select(ProductMedia)
         .where(ProductMedia.product_id == product_id)
@@ -492,6 +583,7 @@ async def add_product_media(
     product = product_result.scalar_one_or_none()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    await check_shop_access(db, product.shop_id, current_user)
 
     media = ProductMedia(product_id=product_id, **media_data.model_dump())
     db.add(media)
@@ -507,6 +599,14 @@ async def delete_product_media(media_id: UUID, current_user: User = Depends(get_
     media = result.scalar_one_or_none()
     if not media:
         raise HTTPException(status_code=404, detail="Media not found")
+    # Verify ownership via the parent product — parent must exist
+    product_result = await db.execute(
+        select(SupplierProduct).where(SupplierProduct.id == media.product_id)
+    )
+    product = product_result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Parent product not found")
+    await check_shop_access(db, product.shop_id, current_user)
 
     await db.delete(media)
     await db.flush()

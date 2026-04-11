@@ -16,7 +16,6 @@ from src.api.deps import (
 from src.api.deps import get_db
 from src.core.repository.unit_of_work import UnitOfWork
 from src.domains.accounts.models import User
-from src.domains.accounts.repository.account import AccountRepository
 from src.domains.shops.schemas import (
     ShopCreate,
     ShopResponse,
@@ -88,16 +87,9 @@ async def list_shops(
         else:
             shops = await service.list_shops_by_account(account_id)
     else:
-        account_repo = AccountRepository(session)
-        accounts = await account_repo.get_by_owner(current_user.id)
-        shops = []
-        for account in accounts:
-            if shop_role:
-                shops.extend(
-                    await service._repository.get_by_role(account.id, shop_role)
-                )
-            else:
-                shops.extend(await service.list_shops_by_account(account.id))
+        shops = await service._repository.get_by_owner(current_user.id)
+        if shop_role:
+            shops = [s for s in shops if s.shop_role == shop_role]
     return shops
 
 

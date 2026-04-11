@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     # Redis
     # ------------------------------------------------------------------
     redis_url: str = "redis://localhost:6379/0"
+    celery_broker_url: str = ""  # Falls back to redis_url if empty (see workers/celery_config.py)
 
     # ------------------------------------------------------------------
     # Kafka
@@ -78,7 +79,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
     sentry_dsn: str = ""
-    cors_origins: str = "*"
+    cors_origins: str = "http://localhost:3000,http://localhost:8080"
 
     # ------------------------------------------------------------------
     # Webhook Security

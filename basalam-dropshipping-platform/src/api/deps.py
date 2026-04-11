@@ -43,7 +43,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 def decode_token(token: str) -> dict:
     """Decode and validate JWT token"""
-    import jwt
+    from jose import jwt
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -108,18 +108,23 @@ async def get_current_active_user(
     return current_user
 
 
-async def get_redis() -> Optional[redis.Redis]:
-    """Get shared Redis client (singleton via core module)"""
+async def get_redis() -> AsyncGenerator[redis.Redis, None]:
+    """Get shared Redis client (singleton via core module).
+    Raises 503 if Redis is unavailable.
+    """
     import structlog
 
     logger = structlog.get_logger(__name__)
     from src.core.redis_client import get_redis_client
     try:
-        client = await get_redis_client()
+        client = get_redis_client()
         yield client
     except Exception as e:
-        logger.warning("redis_unavailable", error=str(e))
-        yield None
+        logger.error("redis_client_init_failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Redis is temporarily unavailable",
+        )
 
 
 def require_role(*roles: str):
@@ -180,6 +185,30 @@ async def verify_shop_ownership(
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
     return shop
+
+
+def is_admin(user: User) -> bool:
+    """Check if user has admin role."""
+    return user.role == "admin"
+
+
+async def check_shop_access(
+    db: AsyncSession, shop_id: UUID, user: User
+) -> None:
+    """
+    Verify the shop belongs to an account owned by the current user.
+    Admin role bypasses this check and can access any shop.
+    Raises 403 if the user does not own the shop.
+    """
+    if is_admin(user):
+        return
+    repo = ShopRepository(db)
+    shop = await repo.get_by_id_and_owner(shop_id, user.id)
+    if not shop:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this shop",
+        )
 
 
 async def get_event_publisher(request: Request) -> EventPublisher:
