@@ -467,3 +467,23 @@ class BasalamClient:
             self._handle_response_error(response)
 
         return response.json()
+
+    async def update_webhook(
+        self, webhook_id: str, config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Update an existing webhook's configuration (secret, URL, etc.).
+
+        PATCHes /webhooks/{webhook_id} with the provided config dict.
+        """
+        settings = get_settings()
+        async with httpx.AsyncClient() as client:
+            response = await client.patch(
+                f"{settings.basalam_webhook_url}/webhooks/{webhook_id}",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                json=config,
+            )
+
+        if response.status_code >= 400:
+            self._handle_response_error(response)
+
+        return response.json()

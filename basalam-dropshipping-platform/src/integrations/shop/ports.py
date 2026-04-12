@@ -162,6 +162,11 @@ class ShopConnectorPort(ABC):
         pass
     
     @abstractmethod
+    async def update_webhook(self, webhook_id: str, config: Dict[str, Any]) -> bool:
+        """Update an existing webhook's configuration (secret, URL, etc.)"""
+        pass
+
+    @abstractmethod
     async def verify_webhook_signature(self, payload: bytes, signature: str) -> bool:
         """Verify webhook signature for security"""
         pass

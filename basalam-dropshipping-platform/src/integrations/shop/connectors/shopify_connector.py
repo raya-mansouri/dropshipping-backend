@@ -61,6 +61,9 @@ class ShopifyConnector(BaseShopConnector):
     async def unregister_webhook(self, webhook_id: str) -> bool:
         raise NotImplementedError
 
+    async def update_webhook(self, webhook_id: str, config: Dict[str, Any]) -> bool:
+        raise NotImplementedError
+
     async def verify_webhook_signature(self, payload: bytes, signature: str) -> bool:
         raise NotImplementedError
 

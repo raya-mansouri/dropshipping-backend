@@ -251,6 +251,16 @@ class BasalamConnector(BaseShopConnector):
         except Exception:
             return False
 
+    async def update_webhook(self, webhook_id: str, config: Dict[str, Any]) -> bool:
+        """Update an existing webhook's configuration on Basalam."""
+        await self._ensure_connected()
+        client = self._get_client()
+        try:
+            await client.update_webhook(webhook_id, config)
+            return True
+        except Exception:
+            return False
+
     async def verify_webhook_signature(self, payload: bytes, signature: str) -> bool:
         import hashlib
         import hmac

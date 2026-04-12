@@ -5,6 +5,8 @@ Secure generation, encryption, and rotation of webhook secrets.
 
 Uses Fernet symmetric encryption for storing webhook secrets.
 """
+import hashlib
+import hmac
 import secrets
 import structlog
 from datetime import datetime, timedelta, timezone
@@ -101,6 +103,24 @@ class WebhookSecretService:
             logger.error("Failed to decrypt webhook secret: invalid token")
             raise
 
+    def decrypt_from_storage(self, encrypted_data: str) -> str:
+        """
+        Decrypt Fernet-encrypted data from database storage.
+
+        Alias for decrypt_for_verification(). Used by IntegrationService
+        to decrypt OAuth credentials stored in credentials_encrypted.
+
+        Args:
+            encrypted_data: The Fernet-encrypted string from storage
+
+        Returns:
+            The plaintext string
+
+        Raises:
+            InvalidToken: If the data cannot be decrypted (wrong key or tampered)
+        """
+        return self.decrypt_for_verification(encrypted_data)
+
     def rotate_secret(
         self,
         current_encrypted: Optional[str],
@@ -152,9 +172,6 @@ class WebhookSecretService:
         Returns:
             Signature string in format "sha256=<hex>" or "t=<ts>,sha256=<hex>"
         """
-        import hmac
-        import hashlib
-
         if timestamp is not None:
             # Signed payload format: "timestamp.payload"
             signed_payload = f"{timestamp}.".encode() + payload
@@ -194,7 +211,6 @@ class WebhookSecretService:
         Returns:
             Tuple of (is_valid, error_message)
         """
-        import hmac
         import time
 
         if not signature_header:
@@ -276,8 +292,6 @@ class WebhookSecretService:
         self, secret: str, payload: bytes, signature_header: str
     ) -> Tuple[bool, Optional[str]]:
         """Verify legacy sha1=<hex> format (for backward compatibility)."""
-        import hmac
-        import hashlib
 
         provided_hash = signature_header.replace("sha1=", "")
         expected_hash = hmac.new(

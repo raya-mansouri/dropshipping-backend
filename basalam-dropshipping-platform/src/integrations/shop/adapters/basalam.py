@@ -325,6 +325,28 @@ class BasalamConnectorAdapter(ShopConnectorPort):
             )
             return response.status_code in [200, 204]
     
+    async def update_webhook(self, webhook_id: str, config: Dict[str, Any]) -> bool:
+        """Update an existing webhook's configuration (secret, URL, etc.)."""
+        if not self.credentials or not self.credentials.access_token:
+            raise ValueError("Cannot update webhook: no credentials or access_token available")
+
+        _s = get_settings()
+        async with httpx.AsyncClient() as client:
+            response = await client.patch(
+                f"{_s.basalam_webhook_url}/webhooks/{webhook_id}",
+                headers={"Authorization": f"Bearer {self.credentials.access_token}"},
+                json=config,
+            )
+            if response.status_code not in [200, 204]:
+                logger.error(
+                    "update_webhook_failed",
+                    webhook_id=webhook_id,
+                    status_code=response.status_code,
+                    response_body=response.text[:500],
+                )
+                return False
+            return True
+    
     async def verify_webhook_signature(self, payload: bytes, signature: str) -> bool:
         """Verify Basalam webhook signature (HMAC-SHA256).
 
