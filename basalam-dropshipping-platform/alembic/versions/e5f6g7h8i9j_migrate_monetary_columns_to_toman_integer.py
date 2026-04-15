@@ -73,15 +73,34 @@ def upgrade() -> None:
     op.alter_column("disputes", "outcome_amount",
                     type_=sa.Numeric(15, 0), existing_type=sa.Numeric(12, 2))
 
-    # ── price_history ──
-    op.alter_column("price_history", "old_price",
-                    type_=sa.Numeric(15, 0), existing_type=sa.Numeric(12, 2))
-    op.alter_column("price_history", "new_price",
-                    type_=sa.Numeric(15, 0), existing_type=sa.Numeric(12, 2))
-    op.alter_column("price_history", "old_supplier_price",
-                    type_=sa.Numeric(15, 0), existing_type=sa.Numeric(12, 2))
-    op.alter_column("price_history", "new_supplier_price",
-                    type_=sa.Numeric(15, 0), existing_type=sa.Numeric(12, 2))
+    # ── price_history (table not yet created by any previous migration) ──
+    op.create_table(
+        "price_history",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("variant_id", sa.UUID(), nullable=False),
+        sa.Column("listing_id", sa.UUID(), nullable=True),
+        sa.Column("old_price", sa.Numeric(15, 0), nullable=False),
+        sa.Column("new_price", sa.Numeric(15, 0), nullable=False),
+        sa.Column("old_supplier_price", sa.Numeric(15, 0), nullable=True),
+        sa.Column("new_supplier_price", sa.Numeric(15, 0), nullable=True),
+        sa.Column("margin_percent", sa.Numeric(5, 2), nullable=True),
+        sa.Column("margin_changed", sa.String(20), nullable=True),
+        sa.Column("change_reason", sa.String(50), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["variant_id"], ["supplier_variants.id"],
+            name=op.f("fk__price_history__variant_id__supplier_variants"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["listing_id"], ["seller_listings.id"],
+            name=op.f("fk__price_history__listing_id__seller_listings"),
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk__price_history")),
+    )
+    op.create_index("idx_price_history_variant", "price_history", ["variant_id"])
+    op.create_index("idx_price_history_listing", "price_history", ["listing_id"])
+    op.create_index("idx_price_history_created", "price_history", ["created_at"])
 
     # ── supplier_variants ──
     op.alter_column("supplier_variants", "cost_price",
@@ -106,14 +125,10 @@ def downgrade() -> None:
                     type_=sa.Numeric(12, 2), existing_type=sa.Numeric(15, 0))
 
     # ── price_history ──
-    op.alter_column("price_history", "new_supplier_price",
-                    type_=sa.Numeric(12, 2), existing_type=sa.Numeric(15, 0))
-    op.alter_column("price_history", "old_supplier_price",
-                    type_=sa.Numeric(12, 2), existing_type=sa.Numeric(15, 0))
-    op.alter_column("price_history", "new_price",
-                    type_=sa.Numeric(12, 2), existing_type=sa.Numeric(15, 0))
-    op.alter_column("price_history", "old_price",
-                    type_=sa.Numeric(12, 2), existing_type=sa.Numeric(15, 0))
+    op.drop_index("idx_price_history_created", table_name="price_history")
+    op.drop_index("idx_price_history_listing", table_name="price_history")
+    op.drop_index("idx_price_history_variant", table_name="price_history")
+    op.drop_table("price_history")
 
     # ── disputes ──
     op.alter_column("disputes", "outcome_amount",
