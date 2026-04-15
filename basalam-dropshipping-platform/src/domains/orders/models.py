@@ -44,9 +44,9 @@ class Order(Base, UUIDMixin, TimestampMixin):
     
     customer_data = Column(JSONB, default=dict)  # Customer info
     
-    total_price = Column(Numeric(12, 2), nullable=False)  # Total customer paid
-    shipping_price = Column(Numeric(12, 2), default=0)
-    discount = Column(Numeric(12, 2), default=0)
+    total_price = Column(Numeric(15, 0), nullable=False)  # Total customer paid in Toman
+    shipping_price = Column(Numeric(15, 0), default=0)
+    discount = Column(Numeric(15, 0), default=0)
     
     status = Column(String(30), default=OrderStatus.PENDING.value)
     
@@ -92,12 +92,12 @@ class OrderItem(Base, UUIDMixin, TimestampMixin):
     
     quantity = Column(Integer, nullable=False)
     
-    # Price snapshot - CRITICAL per a.md
-    supplier_price = Column(Numeric(12, 2), nullable=False)  # At order time
-    seller_price = Column(Numeric(12, 2), nullable=False)  # At order time
-    shipping_price = Column(Numeric(12, 2), default=0)
-    
-    profit = Column(Numeric(12, 2))  # seller_price - supplier_price
+    # Price snapshot in Toman - CRITICAL per a.md
+    supplier_price = Column(Numeric(15, 0), nullable=False)  # At order time
+    seller_price = Column(Numeric(15, 0), nullable=False)  # At order time
+    shipping_price = Column(Numeric(15, 0), default=0)
+
+    profit = Column(Numeric(15, 0))  # seller_price - supplier_price in Toman
     
     status = Column(String(30), default=OrderStatus.PENDING.value)
     

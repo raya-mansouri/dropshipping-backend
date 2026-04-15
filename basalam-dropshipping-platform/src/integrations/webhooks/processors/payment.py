@@ -40,8 +40,8 @@ class PaymentWebhookProcessor(WebhookProcessor):
             "data": {
                 "payment_id": "payment-123",
                 "order_id": "order-456",
-                "amount": 99.99,
-                "currency": "USD",
+                "amount": 150000,
+                "currency": "IRR",
                 "status": "completed" | "failed",
                 "transaction_id": "txn-789"
             }

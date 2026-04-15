@@ -11,6 +11,7 @@ from typing import List, Optional, Dict, Any
 
 from ..connector import (
     BaseShopConnector,
+    parse_toman,
     Product,
     ProductVariant,
     Inventory,
@@ -422,7 +423,7 @@ class BasalamConnector(BaseShopConnector):
             product_id=product_id,
             title=data.get("title", ""),
             description=data.get("description", ""),
-            price=float(data.get("price", 0)),
+            price=parse_toman(data.get("price", 0), "price", "_map_product"),
             category=data.get("category"),
             images=data.get("images", []),
             variants=variants,
@@ -442,7 +443,7 @@ class BasalamConnector(BaseShopConnector):
                     variant_id=item.get("variant_id"),
                     title=item.get("title", ""),
                     quantity=item.get("quantity", 0),
-                    price=float(item.get("price", 0)),
+                    price=parse_toman(item.get("price", 0), "price", "_map_order_item"),
                     metadata=item.get("metadata", {}),
                 )
             )
@@ -451,8 +452,8 @@ class BasalamConnector(BaseShopConnector):
             order_id=data.get("order_id", ""),
             customer=data.get("customer", {}),
             items=items,
-            total_price=float(data.get("total_price", 0)),
-            shipping_price=float(data.get("shipping_price", 0)),
+            total_price=parse_toman(data.get("total_price", 0), "total_price", "_map_order"),
+            shipping_price=parse_toman(data.get("shipping_price", 0), "shipping_price", "_map_order"),
             status=data.get("status", "pending"),
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
@@ -465,7 +466,7 @@ class BasalamConnector(BaseShopConnector):
             external_product_id=str(data.get("product_id") or data.get("id", "")),
             title=data.get("title", ""),
             description=data.get("description", ""),
-            price=float(data.get("price", 0)),
+            price=parse_toman(data.get("price", 0), "price", "_map_to_shop_product"),
             inventory=int(data.get("inventory", data.get("stock", 0))),
             category=data.get("category"),
             images=data.get("images", []),
@@ -479,7 +480,7 @@ class BasalamConnector(BaseShopConnector):
             external_order_id=str(data.get("order_id", "")),
             customer_data=data.get("customer", {}),
             items=data.get("items", []),
-            total_price=float(data.get("total_price", 0)),
-            shipping_price=float(data.get("shipping_price", 0)),
+            total_price=parse_toman(data.get("total_price", 0), "total_price", "_map_to_shop_order"),
+            shipping_price=parse_toman(data.get("shipping_price", 0), "shipping_price", "_map_to_shop_order"),
             status=data.get("status", "pending"),
         )

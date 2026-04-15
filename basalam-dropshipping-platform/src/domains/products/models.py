@@ -111,7 +111,7 @@ class SupplierVariant(Base, UUIDMixin, TimestampMixin):
     supplier_product_id = Column(UUID(as_uuid=True), ForeignKey("supplier_products.id"), nullable=False)
     variant_id = Column(UUID(as_uuid=True), ForeignKey("product_variants.id"), nullable=False)
     
-    cost_price = Column(Numeric(12, 2), nullable=False)
+    cost_price = Column(Numeric(15, 0), nullable=False)  # Supplier cost in Toman
     inventory = Column(Integer, default=0)
     reserved_inventory = Column(Integer, default=0)  # Reserved for orders
     
@@ -215,12 +215,12 @@ class SellerVariant(Base, UUIDMixin, TimestampMixin):
     listing_id = Column(UUID(as_uuid=True), ForeignKey("seller_listings.id"), nullable=False)
     supplier_variant_id = Column(UUID(as_uuid=True), ForeignKey("supplier_variants.id"), nullable=False)
     
-    # Calculated price (cached)
-    price = Column(Numeric(12, 2), nullable=False)
+    # Calculated price in Toman (cached)
+    price = Column(Numeric(15, 0), nullable=False)
     inventory_cache = Column(Integer)  # Cached from supplier
     
     # Override settings
-    custom_price = Column(Numeric(12, 2))  # Seller's custom price (overrides calculation)
+    custom_price = Column(Numeric(15, 0))  # Seller's custom price in Toman
     is_enabled = Column(Boolean, default=True)
     
     # Relationships

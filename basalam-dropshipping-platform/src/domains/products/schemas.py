@@ -110,7 +110,7 @@ class ProductVariantResponse(ProductVariantBase):
 
 # Supplier Variant
 class SupplierVariantBase(BaseModel):
-    cost_price: Decimal = Field(..., ge=0)
+    cost_price: Decimal = Field(..., ge=0, description="Supplier cost price in Toman")
     inventory: int = Field(0, ge=0)
 
 
@@ -170,7 +170,7 @@ class SellerListingResponse(SellerListingBase):
 
 # Seller Variant
 class SellerVariantBase(BaseModel):
-    custom_price: Optional[Decimal] = None
+    custom_price: Optional[Decimal] = Field(None, description="Seller's custom price override in Toman")
     is_enabled: bool = True
 
 
@@ -180,7 +180,7 @@ class SellerVariantResponse(SellerVariantBase):
     id: UUID
     listing_id: UUID
     supplier_variant_id: UUID
-    price: Decimal
+    price: Decimal = Field(description="Calculated selling price in Toman")
     inventory_cache: Optional[int]
     created_at: datetime
     updated_at: datetime
@@ -190,8 +190,8 @@ class SellerVariantResponse(SellerVariantBase):
 class CatalogProductFilter(BaseModel):
     shop_id: Optional[UUID] = None
     category_id: Optional[UUID] = None
-    min_price: Optional[Decimal] = None
-    max_price: Optional[Decimal] = None
+    min_price: Optional[Decimal] = Field(None, description="Minimum price filter in Toman")
+    max_price: Optional[Decimal] = Field(None, description="Maximum price filter in Toman")
     in_stock_only: bool = False
     search: Optional[str] = None
 
@@ -204,8 +204,8 @@ class CatalogProductResponse(BaseModel):
     title: str
     description: Optional[str]
     category_name: Optional[str]
-    min_price: Decimal
-    max_price: Decimal
+    min_price: Decimal = Field(description="Minimum variant price in Toman")
+    max_price: Decimal = Field(description="Maximum variant price in Toman")
     has_variants: bool
     images: List[ProductMediaResponse]
     supplier_name: str

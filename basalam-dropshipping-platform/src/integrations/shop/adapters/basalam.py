@@ -17,6 +17,7 @@ from typing import List, Optional, Dict, Any
 import httpx
 
 from src.core.config import get_settings
+from ..connector import parse_toman
 from ..ports import (
     ShopConnectorPort,
     ShopProducts,
@@ -176,7 +177,7 @@ class BasalamConnectorAdapter(ShopConnectorPort):
                 external_product_id=str(item.get("id", item.get("product_id", ""))),
                 title=item.get("title", ""),
                 description=item.get("description", ""),
-                price=float(item.get("price", 0)),
+                price=parse_toman(item.get("price", 0), "price", "fetch_products"),
                 inventory=int(item.get("inventory", 0)),
                 category=item.get("category"),
                 images=images,
@@ -205,7 +206,7 @@ class BasalamConnectorAdapter(ShopConnectorPort):
             external_product_id=str(item.get("id", item.get("product_id", ""))),
             title=item.get("title", ""),
             description=item.get("description", ""),
-            price=float(item.get("price", 0)),
+            price=parse_toman(item.get("price", 0), "price", "fetch_product"),
             inventory=int(item.get("inventory", 0)),
             category=item.get("category"),
             images=images,
@@ -247,8 +248,8 @@ class BasalamConnectorAdapter(ShopConnectorPort):
                 external_order_id=str(item["order_id"]),
                 customer_data=item.get("customer", {}),
                 items=item.get("items", []),
-                total_price=float(item.get("total_price", 0)),
-                shipping_price=float(item.get("shipping_price", 0)),
+                total_price=parse_toman(item.get("total_price", 0), "total_price", "fetch_orders"),
+                shipping_price=parse_toman(item.get("shipping_price", 0), "shipping_price", "fetch_orders"),
                 status=item.get("status", "pending")
             ))
         
@@ -269,8 +270,8 @@ class BasalamConnectorAdapter(ShopConnectorPort):
             external_order_id=str(item["order_id"]),
             customer_data=item.get("customer", {}),
             items=item.get("items", []),
-            total_price=float(item.get("total_price", 0)),
-            shipping_price=float(item.get("shipping_price", 0)),
+            total_price=parse_toman(item.get("total_price", 0), "total_price", "fetch_order"),
+            shipping_price=parse_toman(item.get("shipping_price", 0), "shipping_price", "fetch_order"),
             status=item.get("status", "pending")
         )
     

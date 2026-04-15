@@ -25,10 +25,11 @@ class PriceHistory(Base, UUIDMixin, TimestampMixin):
     )
     listing_id = Column(PGUUID(as_uuid=True), ForeignKey("seller_listings.id"))
 
-    old_price = Column(Numeric(12, 2), nullable=False)
-    new_price = Column(Numeric(12, 2), nullable=False)
-    old_supplier_price = Column(Numeric(12, 2))
-    new_supplier_price = Column(Numeric(12, 2))
+    # Prices in Toman (whole numbers)
+    old_price = Column(Numeric(15, 0), nullable=False)
+    new_price = Column(Numeric(15, 0), nullable=False)
+    old_supplier_price = Column(Numeric(15, 0))
+    new_supplier_price = Column(Numeric(15, 0))
 
     margin_percent = Column(Numeric(5, 2))
     margin_changed = Column(String(20))  # increased, decreased, unchanged

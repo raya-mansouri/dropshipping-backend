@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from uuid import UUID, uuid4
 
 from .base import DomainEvent
@@ -10,16 +10,16 @@ class OrderCreated(DomainEvent):
         self,
         order_id: UUID,
         shop_id: UUID,
-        total_price: float,
+        total_price: int,
         items_count: int,
-        occurred_at: datetime = None,
-        metadata: Dict[str, Any] = None,
+        occurred_at: Optional[datetime] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             event_id=uuid4(),
             event_type="OrderCreated",
             occurred_at=occurred_at or datetime.now(timezone.utc),
-            metadata=metadata,
+            metadata=metadata or {},
         )
         self.order_id = order_id
         self.shop_id = shop_id
@@ -32,15 +32,15 @@ class OrderPaid(DomainEvent):
         self,
         order_id: UUID,
         payment_id: UUID,
-        amount: float,
-        occurred_at: datetime = None,
-        metadata: Dict[str, Any] = None,
+        amount: int,
+        occurred_at: Optional[datetime] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             event_id=uuid4(),
             event_type="OrderPaid",
             occurred_at=occurred_at or datetime.now(timezone.utc),
-            metadata=metadata,
+            metadata=metadata or {},
         )
         self.order_id = order_id
         self.payment_id = payment_id
@@ -52,15 +52,15 @@ class OrderCancelled(DomainEvent):
         self,
         order_id: UUID,
         reason: str,
-        refunded_amount: float,
-        occurred_at: datetime = None,
-        metadata: Dict[str, Any] = None,
+        refunded_amount: int,
+        occurred_at: Optional[datetime] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             event_id=uuid4(),
             event_type="OrderCancelled",
             occurred_at=occurred_at or datetime.now(timezone.utc),
-            metadata=metadata,
+            metadata=metadata or {},
         )
         self.order_id = order_id
         self.reason = reason
@@ -74,14 +74,14 @@ class OrderStatusChanged(DomainEvent):
         old_status: str,
         new_status: str,
         actor: str,
-        occurred_at: datetime = None,
-        metadata: Dict[str, Any] = None,
+        occurred_at: Optional[datetime] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             event_id=uuid4(),
             event_type="OrderStatusChanged",
             occurred_at=occurred_at or datetime.now(timezone.utc),
-            metadata=metadata,
+            metadata=metadata or {},
         )
         self.order_id = order_id
         self.old_status = old_status
@@ -96,14 +96,14 @@ class OrderShipped(DomainEvent):
         shipment_id: UUID,
         tracking_code: str,
         carrier: str,
-        occurred_at: datetime = None,
-        metadata: Dict[str, Any] = None,
+        occurred_at: Optional[datetime] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             event_id=uuid4(),
             event_type="OrderShipped",
             occurred_at=occurred_at or datetime.now(timezone.utc),
-            metadata=metadata,
+            metadata=metadata or {},
         )
         self.order_id = order_id
         self.shipment_id = shipment_id

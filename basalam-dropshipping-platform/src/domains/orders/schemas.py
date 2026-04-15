@@ -38,10 +38,10 @@ class OrderItemResponse(BaseModel):
     supplier_shop_id: UUID
     variant_id: UUID
     quantity: int
-    supplier_price: Decimal
-    seller_price: Decimal
-    shipping_price: Decimal
-    profit: Optional[Decimal]
+    supplier_price: Decimal = Field(description="Supplier cost at order time in Toman")
+    seller_price: Decimal = Field(description="Seller price at order time in Toman")
+    shipping_price: Decimal = Field(description="Shipping cost in Toman")
+    profit: Optional[Decimal] = Field(None, description="Profit in Toman")
     status: OrderStatus
     created_at: datetime
 
@@ -65,9 +65,9 @@ class OrderResponse(BaseModel):
     shop_id: UUID
     external_order_id: Optional[str]
     customer_data: dict
-    total_price: Decimal
-    shipping_price: Decimal
-    discount: Decimal
+    total_price: Decimal = Field(description="Total order price in Toman")
+    shipping_price: Decimal = Field(description="Shipping cost in Toman")
+    discount: Decimal = Field(description="Discount amount in Toman")
     status: OrderStatus
     notes: Optional[str]
     confirmed_at: Optional[datetime]

@@ -33,7 +33,7 @@ DEFAULT_PLATFORM_FEE_PERCENT = Decimal("5.0")
 # Dispute window durations
 NORMAL_DISPUTE_WINDOW_HOURS = 72
 HIGH_VALUE_DISPUTE_WINDOW_DAYS = 7
-HIGH_VALUE_THRESHOLD = Decimal("10000000")  # 10M IRR
+HIGH_VALUE_THRESHOLD = Decimal("1000000")  # 1M Toman (high-value orders get extended dispute window)
 
 
 class PaymentService:
@@ -129,7 +129,7 @@ class PaymentService:
         event = PaymentReceived(
             order_id=payment.order_id,
             payment_id=payment.id,
-            amount=float(payment.seller_paid_amount),
+            amount=int(payment.seller_paid_amount),
             gateway=payment.gateway or "unknown",
         )
         await self._publish_event(event)
@@ -137,7 +137,7 @@ class PaymentService:
         escrow_event = PaymentToEscrow(
             order_id=payment.order_id,
             payment_id=payment.id,
-            amount=float(payment.seller_paid_amount),
+            amount=int(payment.seller_paid_amount),
         )
         await self._publish_event(escrow_event)
 
@@ -273,7 +273,7 @@ class PaymentService:
         event = RefundInitiated(
             payment_id=payment_id,
             order_item_id=order_item_id,
-            amount=float(amount),
+            amount=int(amount),
             reason=reason or "not_specified",
         )
         await self._publish_event(event)
@@ -315,7 +315,7 @@ class PaymentService:
             refund_id=refund.id,
             payment_id=refund.payment_id,
             order_item_id=refund.order_item_id,
-            amount=float(refund.amount),
+            amount=int(refund.amount),
         )
         await self._publish_event(event)
 

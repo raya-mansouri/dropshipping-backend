@@ -24,7 +24,7 @@ class ShopProducts(BaseModel):
     external_product_id: str
     title: str
     description: str
-    price: float
+    price: int
     inventory: int
     category: Optional[Dict[str, Any]] = None
     images: List[str] = []
@@ -37,8 +37,8 @@ class ShopOrder(BaseModel):
     external_order_id: str
     customer_data: Dict[str, Any]
     items: List[Dict[str, Any]]
-    total_price: float
-    shipping_price: float = 0
+    total_price: int
+    shipping_price: int = 0
     status: str
 
 

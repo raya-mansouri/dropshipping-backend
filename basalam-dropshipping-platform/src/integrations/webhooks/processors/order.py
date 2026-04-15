@@ -51,7 +51,7 @@ class OrderWebhookProcessor(WebhookProcessor):
                 "status": "processing",
                 "customer": {...},
                 "items": [...],
-                "total_price": 99.99
+                "total_price": 150000
             }
         }
         """
@@ -91,7 +91,7 @@ class OrderWebhookProcessor(WebhookProcessor):
                 order.status = mapped_status
 
                 if "total_price" in data:
-                    order.total_amount = data["total_price"]
+                    order.total_price = data["total_price"]
 
                 logger.info("updated_order_status", order_id=str(order_id), status=mapped_status)
             else:

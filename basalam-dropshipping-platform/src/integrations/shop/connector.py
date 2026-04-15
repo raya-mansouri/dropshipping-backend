@@ -1,11 +1,67 @@
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import List, Optional, Dict, Any
 import structlog
 
 from .ports import ShopConnectorPort
 
 logger = structlog.get_logger(__name__)
+
+
+def parse_toman(value: Any, field_name: str = "price", context: str = "") -> int:
+    """Convert an external API value to Toman (whole-number int).
+
+    Handles int, float, str ("150000", "150000.00"), and Decimal.
+    Rounds instead of truncating. Logs a warning if precision is lost.
+    Raises ValueError if the value cannot be converted.
+    """
+    if isinstance(value, int):
+        return value
+
+    if isinstance(value, float):
+        rounded = round(value)
+        if value != rounded:
+            logger.warning(
+                "toman_precision_loss",
+                field=field_name,
+                original_value=value,
+                rounded_value=rounded,
+                context=context,
+            )
+        return rounded
+
+    if isinstance(value, Decimal):
+        rounded = int(value.quantize(Decimal("1")))
+        if value != rounded:
+            logger.warning(
+                "toman_precision_loss",
+                field=field_name,
+                original_value=str(value),
+                rounded_value=rounded,
+                context=context,
+            )
+        return rounded
+
+    if isinstance(value, str):
+        try:
+            decimal_value = Decimal(value)
+        except InvalidOperation:
+            raise ValueError(f"Cannot convert {field_name}={value!r} to Toman integer")
+        rounded = int(decimal_value.quantize(Decimal("1")))
+        if decimal_value != rounded:
+            logger.warning(
+                "toman_precision_loss",
+                field=field_name,
+                original_value=value,
+                rounded_value=rounded,
+                context=context,
+            )
+        return rounded
+
+    raise ValueError(
+        f"Cannot convert {field_name}={value!r} (type={type(value).__name__}) to Toman integer"
+    )
 
 
 @dataclass
@@ -22,7 +78,7 @@ class ProductVariant:
     variant_id: str
     sku: Optional[str] = None
     title: Optional[str] = None
-    price: Optional[float] = None
+    price: Optional[int] = None
     inventory: int = 0
     attributes: Dict[str, Any] = field(default_factory=dict)
 
@@ -32,7 +88,7 @@ class Product:
     product_id: str
     title: str
     description: str
-    price: float
+    price: int
     category: Optional[Dict[str, Any]] = None
     images: List[str] = field(default_factory=list)
     variants: List[ProductVariant] = field(default_factory=list)
@@ -58,7 +114,7 @@ class OrderItem:
     variant_id: Optional[str] = None
     title: str
     quantity: int
-    price: float
+    price: int
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -67,8 +123,8 @@ class Order:
     order_id: str
     customer: Dict[str, Any] = field(default_factory=dict)
     items: List[OrderItem] = field(default_factory=list)
-    total_price: float = 0.0
-    shipping_price: float = 0.0
+    total_price: int = 0
+    shipping_price: int = 0
     status: str = "pending"
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -88,7 +144,7 @@ class WebhookRegistration:
 class ShippingMethod:
     method_id: str
     name: str
-    price: float
+    price: int
     estimated_days: Optional[int] = None
     carrier: Optional[str] = None
 
@@ -176,7 +232,7 @@ class BaseShopConnector(ShopConnectorPort):
                     variant_id=item.get("variant_id"),
                     title=item.get("title", ""),
                     quantity=item.get("quantity", 1),
-                    price=float(item.get("price", 0)),
+                    price=parse_toman(item.get("price", 0), "price", "create_order_items"),
                     metadata=item.get("metadata", {}),
                 )
             )

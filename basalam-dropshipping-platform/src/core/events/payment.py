@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from uuid import UUID, uuid4
 
 from .base import DomainEvent
@@ -10,16 +10,16 @@ class PaymentReceived(DomainEvent):
         self,
         order_id: UUID,
         payment_id: UUID,
-        amount: float,
+        amount: int,
         gateway: str,
-        occurred_at: datetime = None,
-        metadata: Dict[str, Any] = None,
+        occurred_at: Optional[datetime] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             event_id=uuid4(),
             event_type="PaymentReceived",
             occurred_at=occurred_at or datetime.now(timezone.utc),
-            metadata=metadata,
+            metadata=metadata or {},
         )
         self.order_id = order_id
         self.payment_id = payment_id
@@ -32,15 +32,15 @@ class PaymentToEscrow(DomainEvent):
         self,
         order_id: UUID,
         payment_id: UUID,
-        amount: float,
-        occurred_at: datetime = None,
-        metadata: Dict[str, Any] = None,
+        amount: int,
+        occurred_at: Optional[datetime] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             event_id=uuid4(),
             event_type="PaymentToEscrow",
             occurred_at=occurred_at or datetime.now(timezone.utc),
-            metadata=metadata,
+            metadata=metadata or {},
         )
         self.order_id = order_id
         self.payment_id = payment_id
@@ -53,15 +53,15 @@ class PaymentReleasedToSupplier(DomainEvent):
         order_id: UUID,
         payment_id: UUID,
         supplier_id: UUID,
-        amount: float,
-        occurred_at: datetime = None,
-        metadata: Dict[str, Any] = None,
+        amount: int,
+        occurred_at: Optional[datetime] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             event_id=uuid4(),
             event_type="PaymentReleasedToSupplier",
             occurred_at=occurred_at or datetime.now(timezone.utc),
-            metadata=metadata,
+            metadata=metadata or {},
         )
         self.order_id = order_id
         self.payment_id = payment_id
@@ -74,16 +74,16 @@ class RefundInitiated(DomainEvent):
         self,
         payment_id: UUID,
         order_item_id: UUID,
-        amount: float,
+        amount: int,
         reason: str,
-        occurred_at: datetime = None,
-        metadata: Dict[str, Any] = None,
+        occurred_at: Optional[datetime] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             event_id=uuid4(),
             event_type="RefundInitiated",
             occurred_at=occurred_at or datetime.now(timezone.utc),
-            metadata=metadata,
+            metadata=metadata or {},
         )
         self.payment_id = payment_id
         self.order_item_id = order_item_id
@@ -97,15 +97,15 @@ class RefundCompleted(DomainEvent):
         refund_id: UUID,
         payment_id: UUID,
         order_item_id: UUID,
-        amount: float,
-        occurred_at: datetime = None,
-        metadata: Dict[str, Any] = None,
+        amount: int,
+        occurred_at: Optional[datetime] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             event_id=uuid4(),
             event_type="RefundCompleted",
             occurred_at=occurred_at or datetime.now(timezone.utc),
-            metadata=metadata,
+            metadata=metadata or {},
         )
         self.refund_id = refund_id
         self.payment_id = payment_id

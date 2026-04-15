@@ -39,14 +39,14 @@ class Payment(Base, UUIDMixin, TimestampMixin):
     order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=False)
     order_item_id = Column(UUID(as_uuid=True), ForeignKey("order_items.id"))
     
-    # Amounts
-    seller_paid_amount = Column(Numeric(12, 2), nullable=False)
-    supplier_payable_amount = Column(Numeric(12, 2), nullable=False)
-    platform_fee = Column(Numeric(12, 2), default=0)
-    shipping_cost = Column(Numeric(12, 2), default=0)
+    # Amounts in Toman
+    seller_paid_amount = Column(Numeric(15, 0), nullable=False)
+    supplier_payable_amount = Column(Numeric(15, 0), nullable=False)
+    platform_fee = Column(Numeric(15, 0), default=0)
+    shipping_cost = Column(Numeric(15, 0), default=0)
     
-    # Payment gateway
-    gateway = Column(String(50))  # stripe, idpay, etc.
+    # Payment gateway (Iranian: idpay, zarinpal, etc.)
+    gateway = Column(String(50))
     gateway_transaction_id = Column(String(255))
     gateway_refund_id = Column(String(255))
     
@@ -89,7 +89,7 @@ class Refund(Base, UUIDMixin, TimestampMixin):
     order_item_id = Column(UUID(as_uuid=True), ForeignKey("order_items.id"), nullable=False)
     payment_id = Column(UUID(as_uuid=True), ForeignKey("payments.id"))
     
-    amount = Column(Numeric(12, 2), nullable=False)
+    amount = Column(Numeric(15, 0), nullable=False)  # Toman
     refund_type = Column(String(20))  # full, partial, shipping
     
     reason = Column(Text)
@@ -122,7 +122,7 @@ class SupplierPayout(Base, UUIDMixin, TimestampMixin):
     order_item_id = Column(UUID(as_uuid=True), ForeignKey("order_items.id"), nullable=False)
     payment_id = Column(UUID(as_uuid=True), ForeignKey("payments.id"))
     
-    amount = Column(Numeric(12, 2), nullable=False)
+    amount = Column(Numeric(15, 0), nullable=False)  # Toman
     status = Column(String(30), default="pending")  # pending, processing, completed, failed, cancelled
     
     # Release conditions
@@ -166,7 +166,7 @@ class Dispute(Base, UUIDMixin, TimestampMixin):
     
     # Dispute outcome
     outcome = Column(String(30))  # seller_wins, supplier_wins, partial, cancelled
-    outcome_amount = Column(Numeric(12, 2))  # If partial
+    outcome_amount = Column(Numeric(15, 0))  # Toman, if partial dispute
     
     # Relationships
     order_item = relationship("OrderItem", back_populates="dispute")

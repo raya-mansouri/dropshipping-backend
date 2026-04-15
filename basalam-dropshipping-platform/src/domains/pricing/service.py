@@ -98,7 +98,7 @@ class PricingService:
                 )
 
         seller_price = supplier_price * (Decimal("1") + margin_percent / Decimal("100"))
-        seller_price = seller_price.quantize(Decimal("0.01"))
+        seller_price = seller_price.quantize(Decimal("1"))  # Toman: whole numbers only
 
         profit = seller_price - supplier_price
 

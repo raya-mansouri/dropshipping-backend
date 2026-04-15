@@ -42,10 +42,10 @@ class PaymentResponse(BaseModel):
     id: UUID
     order_id: UUID
     order_item_id: Optional[UUID]
-    seller_paid_amount: Decimal
-    supplier_payable_amount: Decimal
-    platform_fee: Decimal
-    shipping_cost: Decimal
+    seller_paid_amount: Decimal = Field(description="Amount paid by seller in Toman")
+    supplier_payable_amount: Decimal = Field(description="Amount payable to supplier in Toman")
+    platform_fee: Decimal = Field(description="Platform fee in Toman")
+    shipping_cost: Decimal = Field(description="Shipping cost in Toman")
     gateway: Optional[str]
     gateway_transaction_id: Optional[str]
     status: PaymentStatus
@@ -59,7 +59,7 @@ class PaymentResponse(BaseModel):
 
 # Refund
 class RefundCreate(BaseModel):
-    amount: Optional[Decimal] = None  # If null, full refund
+    amount: Optional[Decimal] = Field(None, description="Refund amount in Toman (null = full refund)")
     refund_type: str = Field(..., pattern="^(full|partial|shipping)$")
     reason: str
     requested_by: str = Field(..., pattern="^(seller|customer|admin)$")
@@ -71,7 +71,7 @@ class RefundResponse(BaseModel):
     id: UUID
     order_item_id: UUID
     payment_id: Optional[UUID]
-    amount: Decimal
+    amount: Decimal = Field(description="Refund amount in Toman")
     refund_type: str
     reason: str
     status: RefundStatus
@@ -99,7 +99,7 @@ class DisputeUpdate(BaseModel):
     status: Optional[DisputeStatus] = None
     resolution: Optional[str] = None
     outcome: Optional[str] = Field(None, pattern="^(seller_wins|supplier_wins|partial|cancelled)$")
-    outcome_amount: Optional[Decimal] = None
+    outcome_amount: Optional[Decimal] = Field(None, description="Partial dispute outcome amount in Toman")
 
 
 class DisputeResponse(BaseModel):
@@ -127,7 +127,7 @@ class SupplierPayoutResponse(BaseModel):
     supplier_id: UUID
     order_item_id: UUID
     payment_id: Optional[UUID]
-    amount: Decimal
+    amount: Decimal = Field(description="Payout amount in Toman")
     status: str
     delivery_confirmed_at: Optional[datetime]
     dispute_window_ends_at: Optional[datetime]

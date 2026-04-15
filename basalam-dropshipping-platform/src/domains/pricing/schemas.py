@@ -13,7 +13,7 @@ from typing import Optional, List
 class PriceCalculateRequest(BaseModel):
     """Request schema for price calculation."""
 
-    supplier_price: Decimal = Field(gt=0)
+    supplier_price: Decimal = Field(gt=0, description="Supplier cost price in Toman")
     margin_percent: Decimal = Field(ge=0)
     category_id: Optional[UUID] = None
 
@@ -21,10 +21,10 @@ class PriceCalculateRequest(BaseModel):
 class PriceCalculateResponse(BaseModel):
     """Response schema for price calculation."""
 
-    supplier_price: Decimal
+    supplier_price: Decimal = Field(description="Supplier cost in Toman")
     margin_percent: Decimal
-    seller_price: Decimal
-    profit: Decimal
+    seller_price: Decimal = Field(description="Calculated seller price in Toman")
+    profit: Decimal = Field(description="Profit in Toman")
     category_franchise_percent: Decimal
     meets_franchise_requirement: bool
 
@@ -32,8 +32,8 @@ class PriceCalculateResponse(BaseModel):
 class PriceValidationRequest(BaseModel):
     """Request schema for price validation."""
 
-    seller_price: Decimal = Field(gt=0)
-    supplier_price: Decimal = Field(gt=0)
+    seller_price: Decimal = Field(gt=0, description="Seller price in Toman")
+    supplier_price: Decimal = Field(gt=0, description="Supplier cost in Toman")
     category_id: UUID
 
 
@@ -54,8 +54,8 @@ class PriceHistoryResponse(BaseModel):
     id: UUID
     variant_id: UUID
     listing_id: Optional[UUID]
-    old_price: Decimal
-    new_price: Decimal
+    old_price: Decimal = Field(description="Previous price in Toman")
+    new_price: Decimal = Field(description="New price in Toman")
     margin_percent: Optional[Decimal]
     margin_changed: Optional[str]
     change_reason: Optional[str]

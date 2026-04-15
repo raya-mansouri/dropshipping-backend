@@ -349,7 +349,7 @@ class OrderService:
         event = OrderCreated(
             order_id=order.id,
             shop_id=shop_id,
-            total_price=float(total_price),
+            total_price=int(total_price),
             items_count=len(order_items),
         )
         await self._publish_event(event)
@@ -488,7 +488,7 @@ class OrderService:
         cancel_event = OrderCancelled(
             order_id=order_id,
             reason=reason,
-            refunded_amount=float(order.total_price),
+            refunded_amount=int(order.total_price),
         )
         await self._publish_event(cancel_event)
 
