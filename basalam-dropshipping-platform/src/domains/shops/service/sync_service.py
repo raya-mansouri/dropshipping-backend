@@ -99,7 +99,7 @@ class SyncService:
             "entity_type": entity_type,
             "entity_id": entity_id,
             "status": "pending",
-            "retry_count": "0",
+            "retry_count": 0,
             "scheduled_at": datetime.now(timezone.utc),
         }
 
@@ -196,7 +196,7 @@ class SyncService:
             "integration_id": integration_id,
             "entity_type": entity_type,
             "status": "pending",
-            "retry_count": "0",
+            "retry_count": 0,
             "scheduled_at": scheduled_at,
         }
 
