@@ -24,12 +24,10 @@ from fastapi import APIRouter, Request, HTTPException, Depends, Path
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.config import get_settings
 from src.api.deps import get_db
 from src.core.repository.unit_of_work import UnitOfWork
 from src.domains.shops.repository import ShopIntegrationRepository, PlatformRepository
 from src.domains.webhooks.repository.webhook_event import WebhookEventRepository
-from src.domains.webhooks.repository.processed_event import ProcessedEventRepository
 from src.integrations.webhooks.security import (
     get_ip_validator,
     get_timestamp_validator,
@@ -43,13 +41,11 @@ from src.integrations.webhooks.processors.base import WebhookProcessorRegistry
 from src.integrations.webhooks.processors.product import ProductWebhookProcessor
 from src.integrations.webhooks.processors.order import OrderWebhookProcessor
 from src.integrations.webhooks.processors.inventory import InventoryWebhookProcessor
-from src.integrations.webhooks.processors.payment import PaymentWebhookProcessor
 from src.core.redis_client import get_redis_client
 from src.core.webhook_metrics import (
     record_webhook_received,
     record_webhook_processed,
     record_webhook_failed,
-    record_webhook_dlq,
 )
 
 
@@ -75,7 +71,6 @@ def _build_processor_registry(
     product_proc = ProductWebhookProcessor(secret=secret, db_session=session)
     order_proc = OrderWebhookProcessor(secret=secret, db_session=session)
     inventory_proc = InventoryWebhookProcessor(secret=secret, db_session=session)
-    payment_proc = PaymentWebhookProcessor(secret=secret, db_session=session)
 
     # Basalam event_id → resolved event_type at lookup time
     #   8 → "product.changes"
@@ -85,22 +80,6 @@ def _build_processor_registry(
     registry.register("basalam", "order.created", order_proc)
     registry.register("basalam", "order.parcel_changed", order_proc)
     registry.register("basalam", "inventory.changed", inventory_proc)
-
-    # Non-Basalam platforms (string event types)
-    for event_type in ("order.created", "order.updated"):
-        registry.register("shopify", event_type, order_proc)
-        registry.register("woocommerce", event_type, order_proc)
-
-    for event_type in ("inventory.updated",):
-        registry.register("shopify", event_type, inventory_proc)
-
-    for event_type in ("payment.completed", "payment.failed"):
-        registry.register("shopify", event_type, payment_proc)
-        registry.register("woocommerce", event_type, payment_proc)
-
-    for event_type in ("product.created", "product.updated"):
-        registry.register("shopify", event_type, product_proc)
-        registry.register("woocommerce", event_type, product_proc)
 
     return registry
 
@@ -340,7 +319,7 @@ def _get_client_ip(request: Request) -> str:
 )
 async def receive_webhook(
     request: Request,
-    platform_code: str = Path(..., description="Platform code (e.g., basalam, shopify)"),
+    platform_code: str = Path(..., description="Platform code (e.g., basalam)"),
     integration_id: UUID = Path(..., description="Shop integration UUID"),
     session: AsyncSession = Depends(get_db),
 ):

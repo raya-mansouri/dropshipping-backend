@@ -72,8 +72,12 @@ class BasalamConnector(BaseShopConnector):
             redirect_uri=f"{_s.base_url}/api/v1/shops/integrations/basalam/callback",
             scopes=[
                 "vendor.product.read",
+                "vendor.product.write",
                 "vendor.parcel.read",
+                "vendor.parcel.write",
                 "vendor.shipping.read",
+                "vendor.profile.read",
+                "order-processing",
             ],
         )
 

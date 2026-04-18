@@ -10,7 +10,6 @@ Using Ports & Adapters (Hexagonal) Pattern:
 """
 from abc import ABC, abstractmethod
 from datetime import datetime
-from uuid import UUID
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 
@@ -70,11 +69,11 @@ class ShopConnectorPort(ABC):
     """
     PRIMARY PORT - Abstract interface for shop integrations
     
-    All shop adapters (Basalam, Shopify, WooCommerce) MUST implement this port.
+    All shop adapters MUST implement this port.
     This allows the core domain to be independent of specific platform APIs.
     
     Usage:
-        connector = BasalamConnectorAdapter()
+        connector = BasalamConnector()
         products = await connector.fetch_products()
     """
     

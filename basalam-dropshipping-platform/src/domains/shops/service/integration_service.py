@@ -30,8 +30,6 @@ logger = structlog.get_logger(__name__)
 # Webhook events to subscribe per platform (Basalam uses numeric event_ids)
 PLATFORM_WEBHOOK_EVENTS = {
     "basalam": [8, 5, 7],  # 8=PRODUCT_CREATE_CHANGES, 5=VENDOR_NEW_ORDER, 7=VENDOR_PARCEL_CHANGES
-    "shopify": ["orders/create", "orders/updated", "inventory_levels/update", "products/update"],
-    "woocommerce": ["order.created", "order.updated", "product.updated"],
 }
 
 
@@ -619,6 +617,29 @@ class IntegrationService:
             "last_synced_at": integration.last_synced_at,
         }
 
+    async def deactivate_on_auth_failure(
+        self, integration_id: uuid.UUID, error_message: str = "Authentication failed"
+    ) -> None:
+        """
+        Mark integration as disconnected when a 401 auth error is encountered.
+
+        Called by sync services and webhook processors when they receive
+        authentication errors from the platform API.
+
+        Args:
+            integration_id: UUID of the integration to deactivate
+            error_message: Description of the auth failure
+        """
+        logger.warning(
+            "deactivating_integration_auth_error",
+            integration_id=str(integration_id),
+            error=error_message,
+        )
+        await self._integration_repository.update(
+            integration_id,
+            {"status": "disconnected", "last_error": error_message},
+        )
+
     async def start_oauth(
         self, shop_id: uuid.UUID, platform_code: str
     ) -> Dict[str, Any]:
@@ -640,6 +661,7 @@ class IntegrationService:
         """
         from src.core.config import get_settings
         from src.core.redis_client import get_redis_client
+        from src.integrations.shop.registry import get_connector as get_shop_connector
 
         shop = await self._get_shop_or_fail(shop_id)
         platform = await self._get_platform_or_fail(platform_code)
@@ -648,18 +670,15 @@ class IntegrationService:
         # Generate random state for CSRF protection
         state = uuid.uuid4().hex
 
-        # Build authorization URL
-        client_id = settings.basalam_client_id
+        # Build authorization URL from connector's OAuth config (single source of truth)
+        connector = get_shop_connector(platform_code)
+        oauth_cfg = connector.oauth_config
         redirect_uri = f"{settings.base_url}/api/v1/shops/{shop_id}/oauth/callback"
-        scope = "+".join([
-            "vendor.product.read",
-            "vendor.parcel.read",
-            "vendor.shipping.read"
-        ])
+        scope = "+".join(oauth_cfg.scopes)
 
         authorize_url = (
-            f"https://basalam.com/accounts/sso?"
-            f"client_id={client_id}"
+            f"{oauth_cfg.authorize_url}?"
+            f"client_id={oauth_cfg.client_id}"
             f"&scope={quote(scope)}"
             f"&redirect_uri={quote(redirect_uri, safe='')}"
             f"&state={state}"
@@ -744,6 +763,7 @@ class IntegrationService:
 
         platform_code = state_payload.get("platform_code")
         platform = await self._get_platform_or_fail(platform_code)
+        shop = await self._get_shop_or_fail(shop_id)
 
         # Find the pending integration for this shop/platform
         integrations = await self._integration_repository.get_by_shop(shop_id)
@@ -793,6 +813,17 @@ class IntegrationService:
 
         vendor_id = str(vendor_info["id"])
 
+        # Check if this vendor_id is already connected to a different shop
+        existing = await self._integration_repository.get_by_platform_shop(
+            platform.id, vendor_id
+        )
+        if existing and existing.shop_id != shop_id:
+            await client.close()
+            raise ValueError(
+                f"This Basalam vendor account (ID: {vendor_id}) is already "
+                f"connected to another shop. Disconnect it first."
+            )
+
         # Encrypt credentials with Fernet
         secret_service = get_webhook_secret_service()
         credentials_blob = json.dumps({
@@ -811,6 +842,34 @@ class IntegrationService:
                 "status": "connected",
             },
         )
+
+        # Register webhooks with the platform (non-blocking failure)
+        try:
+            webhook_result = await self._register_webhook_with_platform(
+                integration=integration, platform=platform,
+            )
+            await self._integration_repository.update(integration.id, {
+                "webhook_id": webhook_result.get("webhook_id"),
+                "webhook_status": "active",
+                "webhook_registered_at": datetime.now(timezone.utc),
+            })
+            logger.info("webhooks_registered_after_oauth",
+                        integration_id=str(integration.id),
+                        webhook_id=webhook_result.get("webhook_id"))
+        except Exception as e:
+            logger.warning("webhook_registration_failed_after_oauth",
+                           integration_id=str(integration.id), error=str(e))
+            await self._integration_repository.update(integration.id,
+                {"webhook_status": "not_registered"})
+
+        # Update shop settings with vendor metadata
+        shop_settings = shop.settings or {}
+        shop_settings.update({
+            "basalam_shop_name": vendor_info.get("title", ""),
+            "basalam_shop_identifier": vendor_info.get("identifier", ""),
+            "basalam_connected_at": datetime.now(timezone.utc).isoformat(),
+        })
+        await self._shop_repository.update(shop.id, {"settings": shop_settings})
 
         logger.info(
             "basalam_vendor_connected",

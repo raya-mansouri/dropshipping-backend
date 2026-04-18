@@ -116,7 +116,7 @@ async def connect_platform(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Connect shop to a platform (Basalam, Shopify, etc.)."""
+    """Connect shop to Basalam platform."""
     await verify_shop_ownership(shop_id, current_user, session)
 
     service = IntegrationService(session)

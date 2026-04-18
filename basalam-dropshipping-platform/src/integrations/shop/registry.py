@@ -1,7 +1,7 @@
 from typing import Dict, Type, List, Optional
 
 from .ports import ShopConnectorPort
-from .connectors import BasalamConnector, ShopifyConnector, WooCommerceConnector
+from .connectors import BasalamConnector
 
 
 class ConnectorRegistry:
@@ -11,8 +11,6 @@ class ConnectorRegistry:
 
     def _register_default_connectors(self) -> None:
         self.register_connector("basalam", BasalamConnector)
-        self.register_connector("shopify", ShopifyConnector)
-        self.register_connector("woocommerce", WooCommerceConnector)
 
     def register_connector(
         self, platform_code: str, connector_class: Type[ShopConnectorPort]

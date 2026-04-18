@@ -25,8 +25,6 @@ class ConnectionType(str, Enum):
 
 class PlatformCode(str, Enum):
     BASALAM = "basalam"
-    SHOPIFY = "shopify"
-    WOOCOMMERCE = "woocommerce"
 
 
 # Platform
@@ -161,7 +159,7 @@ class TriggerSyncRequest(BaseModel):
 # API Request/Response (used by routes)
 class ConnectRequest(BaseModel):
     """Request to connect to a platform"""
-    platform_code: str = Field(..., pattern="^(basalam|shopify|woocommerce)$")
+    platform_code: str = Field(..., pattern="^basalam$")
     connection_type: str = Field(..., pattern="^(oauth|api|token)$")
     credentials: dict = {}
 
