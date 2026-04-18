@@ -674,7 +674,7 @@ class IntegrationService:
         connector = get_shop_connector(platform_code)
         oauth_cfg = connector.oauth_config
         redirect_uri = f"{settings.base_url}/api/v1/shops/{shop_id}/oauth/callback"
-        scope = "+".join(oauth_cfg.scopes)
+        scope = " ".join(oauth_cfg.scopes)
 
         authorize_url = (
             f"{oauth_cfg.authorize_url}?"

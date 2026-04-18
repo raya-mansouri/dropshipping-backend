@@ -111,10 +111,10 @@ class Inventory:
 class OrderItem:
     item_id: str
     product_id: str
-    variant_id: Optional[str] = None
     title: str
     quantity: int
     price: int
+    variant_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
