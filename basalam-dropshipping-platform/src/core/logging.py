@@ -62,7 +62,6 @@ def configure_logging() -> None:
         sentry_sdk.init(
             dsn=sentry_dsn,
             environment=app_env,
-            integrations=[SentryHandler(level=log_level_int)],
             send_default_pii=False,
             traces_sample_rate=0.1 if not is_production else 0.01,
         )
