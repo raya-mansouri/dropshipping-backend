@@ -10,7 +10,7 @@ RUN poetry config virtualenvs.in-project true \
     && poetry install --no-interaction --no-ansi --only main
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────────────
-FROM python:3.11-slim
+FROM docker.basalam.dev/basalam/uvicorn-gunicorn:python3.10
 
 WORKDIR /app
 
