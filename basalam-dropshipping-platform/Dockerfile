@@ -1,5 +1,5 @@
 # ── Stage 1: build ────────────────────────────────────────────────────────────
-FROM docker.basalam.dev/basalam/uvicorn-gunicorn:python3.11 AS builder
+FROM docker.basalam.dev/basalam/uvicorn-gunicorn:python3.10 AS builder
 
 WORKDIR /app
 
