@@ -43,6 +43,12 @@ async def main():
         except Exception as e:
             logger.error("consumer_start_failed", topic=c.topic, error=str(e))
 
+    # Run consume loops concurrently
+    consume_tasks = []
+    for c in consumers:
+        task = asyncio.create_task(c.consume(), name=f"consume-{c.topic}")
+        consume_tasks.append(task)
+
     logger.info("all_consumers_started", count=len(consumers))
 
     # Run until shutdown
@@ -57,7 +63,14 @@ async def main():
 
     await shutdown_event.wait()
 
-    # Stop all consumers
+    # Cancel consume tasks and stop consumers
+    for task in consume_tasks:
+        task.cancel()
+    for task in consume_tasks:
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
     for c in consumers:
         try:
             await c.stop()
