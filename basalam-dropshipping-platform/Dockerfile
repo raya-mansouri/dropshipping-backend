@@ -1,5 +1,5 @@
 # ── Stage 1: build ────────────────────────────────────────────────────────────
-FROM python:3.11-slim AS builder
+FROM docker.basalam.dev/basalam/uvicorn-gunicorn:python3.11 AS builder
 
 WORKDIR /app
 
@@ -16,14 +16,27 @@ WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r appgroup \
+    && useradd -r -g appgroup -s /bin/sh appuser
 
 COPY --from=builder /app/.venv .venv
-COPY . .
+COPY --from=builder /app/pyproject.toml ./
+COPY src/ src/
+COPY scripts/ scripts/
+COPY alembic/ alembic/
+COPY alembic.ini ./
+COPY entrypoint.sh ./
 
-ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONUNBUFFERED=1
+RUN chmod +x entrypoint.sh
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+USER appuser
 
 EXPOSE 8000
 
+ENTRYPOINT ["./entrypoint.sh"]
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
