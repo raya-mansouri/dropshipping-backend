@@ -3,11 +3,8 @@ FROM docker.basalam.dev/basalam/uvicorn-gunicorn:python3.10 AS builder
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir poetry==2.1.1
-
-COPY pyproject.toml poetry.lock ./
-RUN poetry config virtualenvs.in-project true \
-    && poetry install --no-interaction --no-ansi --only main
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # ── Stage 2: runtime ─────────────────────────────────────────────────────────
 FROM docker.basalam.dev/basalam/uvicorn-gunicorn:python3.10
@@ -20,8 +17,7 @@ RUN apt-get update \
     && groupadd -r appgroup \
     && useradd -r -g appgroup -s /bin/sh appuser
 
-COPY --from=builder /app/.venv .venv
-COPY --from=builder /app/pyproject.toml ./
+COPY --from=builder /install /usr/local
 COPY src/ src/
 COPY scripts/ scripts/
 COPY alembic/ alembic/
@@ -30,8 +26,7 @@ COPY entrypoint.sh ./
 
 RUN chmod +x entrypoint.sh
 
-ENV PATH="/app/.venv/bin:$PATH" \
-    PYTHONUNBUFFERED=1 \
+ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
 USER appuser
