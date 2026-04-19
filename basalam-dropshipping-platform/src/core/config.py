@@ -20,9 +20,13 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------
-    # Database 
+    # Database
     # ------------------------------------------------------------------
-    database_url: str = "postgresql+asyncpg://user:password@localhost:5432/basalam"
+    db_host: str = "localhost"
+    db_port: int = 5432
+    db_user: str = "postgres"
+    db_password: SecretStr = SecretStr("")
+    db_name: str = "basalam"
 
     # ------------------------------------------------------------------
     # Redis
@@ -90,6 +94,13 @@ class Settings(BaseSettings):
     webhook_base_url: str = ""  # Base URL for webhook endpoint (e.g., https://api.example.com)
     webhook_default_rate_limit: int = 100  # requests per minute
     webhook_default_timestamp_tolerance: int = 300  # seconds
+
+    @property
+    def database_url(self) -> str:
+        return (
+            f"postgresql+asyncpg://{self.db_user}:{self.db_password.get_secret_value()}"
+            f"@{self.db_host}:{self.db_port}/{self.db_name}"
+        )
 
 
 @lru_cache

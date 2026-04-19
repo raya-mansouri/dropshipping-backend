@@ -25,9 +25,6 @@ NAMING_CONVENTION = {
 Base = declarative_base(metadata=MetaData(naming_convention=NAMING_CONVENTION))
 
 DATABASE_URL = get_settings().database_url
-# Ensure async driver is used even if DATABASE_URL lacks the +asyncpg suffix
-if DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 engine = create_async_engine(
     DATABASE_URL,
