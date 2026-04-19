@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     basalam_client_id: str = ""
     basalam_client_secret: SecretStr = SecretStr("")
     base_url: str = "http://localhost:8000"
+    frontend_base_url: str = "http://localhost:3000"  # Used for OAuth redirect_uri
     docs_offline: bool = False
     basalam_auth_url: str = "https://auth.basalam.com"
     basalam_api_url: str = "https://openapi.basalam.com/v1"
@@ -77,10 +78,10 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Application
     # ------------------------------------------------------------------
-    app_env: str = "development"
+    app_env: str = "production"
     log_level: str = "INFO"
-    sentry_dsn: str = ""
-    cors_origins: str = "http://localhost:3000,http://localhost:8080"
+    sentry_dsn: str = "https://2087dcd94d802b122cd6632bbe146c28@sentry.basalam.com/660"
+    cors_origins: str = "*"
 
     # ------------------------------------------------------------------
     # Webhook Security
