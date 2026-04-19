@@ -1,8 +1,7 @@
 # Production overlay — run with:
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-# Dev tools (kafka-ui, minio) are excluded via profiles in the base file.
-# This file adds production-specific overrides.
+# Dev tools (kafka-ui, minio) excluded via profiles in base file.
 
 services:
 
@@ -11,7 +10,6 @@ services:
     environment:
       APP_ENV: production
       LOG_LEVEL: info
-      UVICORN_WORKERS: 4
     deploy:
       replicas: 2
       resources:
@@ -29,11 +27,9 @@ services:
 
   worker:
     restart: always
+    command: ["celery", "-A", "src.workers.celery_config:celery_app", "worker", "--loglevel=info", "--concurrency=8", "--max-tasks-per-child=500"]
     environment:
       APP_ENV: production
-      LOG_LEVEL: info
-      CELERY_CONCURRENCY: 8
-      CELERY_MAX_TASKS_PER_CHILD: 500
     deploy:
       replicas: 2
       resources:
@@ -70,7 +66,6 @@ services:
     restart: always
     environment:
       APP_ENV: production
-      LOG_LEVEL: info
     deploy:
       replicas: 2
       resources:

@@ -96,39 +96,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # ---- Registration ----
 
 
-@router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
-    """
-    Register a new user using phone number
-
-    Creates user account and returns access/refresh tokens
-    """
-    result = await db.execute(select(User).where(User.phone == user_data.phone))
-    existing_user = result.scalar_one_or_none()
-
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Phone number already registered"
-        )
-
-    user = User(
-        phone=user_data.phone,
-        password_hash=hash_password(user_data.password),
-        full_name=user_data.full_name,
-        is_active=True,
-        is_verified=False,
-        role=UserRole.USER.value,
-    )
-    db.add(user)
-    await db.flush()
-    await db.refresh(user)
-
-    access_token = create_access_token(user.id)
-    refresh_token = create_refresh_token(user.id)
-
-    return Token(access_token=access_token, refresh_token=refresh_token)
-
-
 @router.post(
     "/register/with-account", response_model=dict, status_code=status.HTTP_201_CREATED
 )

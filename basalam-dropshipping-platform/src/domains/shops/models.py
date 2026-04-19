@@ -5,10 +5,12 @@ Platforms, shops, and integrations
 
 IMPORTANT: shop_role is ONLY 'supplier' OR 'seller' (not both) per a.md
 """
-from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, UniqueConstraint, Integer, Index
+from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, UniqueConstraint, Integer, Index, text
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from src.core.database import Base, TimestampMixin, UUIDMixin
+import uuid as _uuid
+from datetime import datetime, timezone
 
 
 class Platform(Base, UUIDMixin, TimestampMixin):
@@ -30,6 +32,30 @@ class Platform(Base, UUIDMixin, TimestampMixin):
     # Relationships
     integrations = relationship("ShopIntegration", back_populates="platform")
     shipping_methods = relationship("ShippingMethod", back_populates="platform")
+
+    SEED_DATA = [
+        {"code": "basalam", "name": "Basalam", "platform_type": "marketplace"},
+        {"code": "shopify", "name": "Shopify", "platform_type": "seller_system"},
+        {"code": "woocommerce", "name": "WooCommerce", "platform_type": "seller_system"},
+    ]
+    _SEED_NS = _uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+
+    @classmethod
+    def seed(cls, conn):
+        """Insert seed platforms. Idempotent via ON CONFLICT DO NOTHING."""
+        now = datetime.now(timezone.utc)
+        for p in cls.SEED_DATA:
+            conn.execute(text("""
+                INSERT INTO platforms (id, code, name, platform_type, created_at, updated_at)
+                VALUES (:id, :code, :name, :ptype, :now, :now)
+                ON CONFLICT (code) DO NOTHING
+            """), {
+                "id": str(_uuid.uuid5(cls._SEED_NS, f"platform-{p['code']}")),
+                "code": p["code"],
+                "name": p["name"],
+                "ptype": p["platform_type"],
+                "now": now,
+            })
 
 
 class Shop(Base, UUIDMixin, TimestampMixin):
@@ -72,12 +98,12 @@ class ShopIntegration(Base, UUIDMixin, TimestampMixin):
     external_shop_id = Column(String(255))  # ID on external platform
     
     connection_type = Column(String(20), nullable=False)  # oauth, api, token, manual
-    credentials_encrypted = Column(JSONB)  # Encrypted tokens/keys
+    credentials = Column(JSONB)  # OAuth tokens/keys (plaintext)
     webhook_id = Column(String(255))  # Registered webhook ID on platform
-    webhook_secret_encrypted = Column(String(512))  # Fernet-encrypted webhook secret
+    webhook_secret = Column(String(512))  # Webhook secret for HMAC verification
     webhook_status = Column(String(30), default="not_registered")  # active, inactive, not_registered, cleanup_failed
     webhook_registered_at = Column(DateTime(timezone=True))
-    webhook_previous_secret_encrypted = Column(String(512))  # Previous secret during rotation
+    webhook_previous_secret = Column(String(512))  # Previous secret during rotation
     webhook_secret_rotated_at = Column(DateTime(timezone=True))  # When rotation started
     webhook_previous_secret_expires_at = Column(DateTime(timezone=True))  # When old secret stops being valid
     
@@ -97,6 +123,7 @@ class ShopIntegration(Base, UUIDMixin, TimestampMixin):
         return self.platform.code if self.platform else None
     
     __table_args__ = (
+        UniqueConstraint('shop_id', name='uq_shop_integration_shop'),
         UniqueConstraint('platform_id', 'external_shop_id', name='uq_platform_shop'),
     )
 

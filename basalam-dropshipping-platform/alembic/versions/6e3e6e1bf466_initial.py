@@ -1,8 +1,8 @@
 """initial
 
-Revision ID: 57b9ad2a28ba
-Revises: 
-Create Date: 2026-03-22 18:43:56.698642
+Revision ID: 6e3e6e1bf466
+Revises:
+Create Date: 2026-04-19 21:27:55.121510
 
 """
 from typing import Sequence, Union
@@ -10,9 +10,12 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from sqlalchemy import text
+from datetime import datetime, timezone
+import uuid
 
 # revision identifiers, used by Alembic.
-revision: str = '57b9ad2a28ba'
+revision: str = '6e3e6e1bf466'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -28,16 +31,48 @@ def upgrade() -> None:
     sa.Column('actor_id', sa.UUID(), nullable=True),
     sa.Column('old_value', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('new_value', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('reason', sa.Text(), nullable=True),
+    sa.Column('reason', sa.String(length=500), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__audit_logs'))
     )
     op.create_index('idx_audit_logs_action', 'audit_logs', ['action'], unique=False)
     op.create_index('idx_audit_logs_actor', 'audit_logs', ['actor_type', 'actor_id'], unique=False)
     op.create_index('idx_audit_logs_created', 'audit_logs', ['created_at'], unique=False)
     op.create_index('idx_audit_logs_entity', 'audit_logs', ['entity_type', 'entity_id'], unique=False)
+    op.create_table('forbidden_keywords',
+    sa.Column('keyword', sa.String(length=500), nullable=False),
+    sa.Column('category', sa.String(length=50), nullable=False),
+    sa.Column('language', sa.String(length=10), nullable=True),
+    sa.Column('is_active', sa.Boolean(), nullable=True),
+    sa.Column('is_regex', sa.Boolean(), nullable=True),
+    sa.Column('severity', sa.String(length=20), nullable=True),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('created_by', sa.UUID(), nullable=True),
+    sa.Column('updated_by', sa.UUID(), nullable=True),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk__forbidden_keywords'))
+    )
+    op.create_index('idx_forbidden_keywords_active', 'forbidden_keywords', ['is_active'], unique=False)
+    op.create_index('idx_forbidden_keywords_category', 'forbidden_keywords', ['category'], unique=False)
+    op.create_index('idx_forbidden_keywords_keyword', 'forbidden_keywords', ['keyword'], unique=False)
+    op.create_index(op.f('ix__forbidden_keywords__keyword'), 'forbidden_keywords', ['keyword'], unique=False)
+    op.create_table('forbidden_product_rules',
+    sa.Column('rule_type', sa.String(length=50), nullable=False),
+    sa.Column('config', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('is_active', sa.Boolean(), nullable=True),
+    sa.Column('description', sa.Text(), nullable=True),
+    sa.Column('created_by', sa.UUID(), nullable=True),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk__forbidden_product_rules'))
+    )
+    op.create_index('idx_forbidden_rules_active', 'forbidden_product_rules', ['is_active'], unique=False)
+    op.create_index('idx_forbidden_rules_type', 'forbidden_product_rules', ['rule_type'], unique=False)
     op.create_table('fraud_signals',
     sa.Column('entity_type', sa.String(length=50), nullable=False),
     sa.Column('entity_id', sa.UUID(), nullable=False),
@@ -45,10 +80,10 @@ def upgrade() -> None:
     sa.Column('severity', sa.String(length=20), nullable=False),
     sa.Column('data', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('resolved_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('resolved_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__fraud_signals'))
     )
     op.create_index('idx_fraud_signals_created', 'fraud_signals', ['created_at'], unique=False)
@@ -60,9 +95,12 @@ def upgrade() -> None:
     sa.Column('code', sa.String(length=50), nullable=False),
     sa.Column('name', sa.String(length=255), nullable=False),
     sa.Column('platform_type', sa.String(length=50), nullable=False),
+    sa.Column('webhook_allowed_ips', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('webhook_rate_limit', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('webhook_timestamp_tolerance', sa.Integer(), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__platforms'))
     )
     op.create_index(op.f('ix__platforms__code'), 'platforms', ['code'], unique=True)
@@ -71,8 +109,8 @@ def upgrade() -> None:
     sa.Column('description', sa.String(length=255), nullable=True),
     sa.Column('permissions', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__roles')),
     sa.UniqueConstraint('name', name=op.f('uq__roles__name'))
     )
@@ -81,28 +119,41 @@ def upgrade() -> None:
     sa.Column('service', sa.String(length=50), nullable=False),
     sa.Column('message', sa.Text(), nullable=False),
     sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__system_logs'))
     )
     op.create_index('idx_system_logs_created', 'system_logs', ['created_at'], unique=False)
     op.create_index('idx_system_logs_level', 'system_logs', ['level'], unique=False)
     op.create_index('idx_system_logs_service', 'system_logs', ['service'], unique=False)
     op.create_table('users',
-    sa.Column('email', sa.String(length=255), nullable=False),
+    sa.Column('phone', sa.String(length=11), nullable=False),
     sa.Column('password_hash', sa.String(length=255), nullable=False),
     sa.Column('full_name', sa.String(length=255), nullable=True),
-    sa.Column('phone', sa.String(length=20), nullable=True),
     sa.Column('is_active', sa.Boolean(), nullable=True),
     sa.Column('is_verified', sa.Boolean(), nullable=True),
     sa.Column('role', sa.String(length=20), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__users'))
     )
-    op.create_index(op.f('ix__users__email'), 'users', ['email'], unique=True)
+    op.create_index(op.f('ix__users__phone'), 'users', ['phone'], unique=True)
+    op.create_table('webhook_event_logs',
+    sa.Column('platform_id', sa.String(length=100), nullable=False),
+    sa.Column('event_id', sa.String(length=255), nullable=False),
+    sa.Column('payload_hash', sa.String(length=64), nullable=True),
+    sa.Column('processed_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk__webhook_event_logs')),
+    sa.UniqueConstraint('platform_id', 'event_id', name='uq_webhook_event_logs_platform_event')
+    )
+    op.create_index('ix_webhook_event_logs_created', 'webhook_event_logs', ['created_at'], unique=False)
+    op.create_index('ix_webhook_event_logs_platform', 'webhook_event_logs', ['platform_id'], unique=False)
     op.create_table('accounts',
     sa.Column('owner_user_id', sa.UUID(), nullable=False),
     sa.Column('account_type', sa.String(length=20), nullable=False),
@@ -110,8 +161,8 @@ def upgrade() -> None:
     sa.Column('business_id', sa.String(length=50), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['owner_user_id'], ['users.id'], name=op.f('fk__accounts__owner_user_id__users')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__accounts'))
     )
@@ -124,8 +175,8 @@ def upgrade() -> None:
     sa.Column('is_forbidden', sa.Boolean(), nullable=True),
     sa.Column('is_active', sa.Boolean(), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['parent_id'], ['categories.id'], name=op.f('fk__categories__parent_id__categories')),
     sa.ForeignKeyConstraint(['platform_id'], ['platforms.id'], name=op.f('fk__categories__platform_id__platforms')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__categories'))
@@ -133,7 +184,6 @@ def upgrade() -> None:
     op.create_table('notification_preferences',
     sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('event_type', sa.String(length=50), nullable=False),
-    sa.Column('email_enabled', sa.Boolean(), nullable=True),
     sa.Column('sms_enabled', sa.Boolean(), nullable=True),
     sa.Column('in_app_enabled', sa.Boolean(), nullable=True),
     sa.Column('webhook_enabled', sa.Boolean(), nullable=True),
@@ -141,8 +191,8 @@ def upgrade() -> None:
     sa.Column('quiet_hours_start', sa.String(length=5), nullable=True),
     sa.Column('quiet_hours_end', sa.String(length=5), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('fk__notification_preferences__user_id__users')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__notification_preferences')),
     sa.UniqueConstraint('user_id', 'event_type', name='uq_user_event_preference')
@@ -156,11 +206,11 @@ def upgrade() -> None:
     sa.Column('action_type', sa.String(length=50), nullable=True),
     sa.Column('payload', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=True),
-    sa.Column('read_at', sa.DateTime(), nullable=True),
+    sa.Column('read_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('read_by', sa.UUID(), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('fk__notifications__user_id__users')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__notifications'))
     )
@@ -171,7 +221,7 @@ def upgrade() -> None:
     sa.Column('event_id', sa.String(length=255), nullable=False),
     sa.Column('event_hash', sa.String(length=64), nullable=True),
     sa.Column('platform_id', sa.UUID(), nullable=False),
-    sa.Column('processed_at', sa.DateTime(), nullable=False),
+    sa.Column('processed_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('processed_by', sa.String(length=50), nullable=True),
     sa.ForeignKeyConstraint(['platform_id'], ['platforms.id'], name=op.f('fk__processed_events__platform_id__platforms')),
     sa.PrimaryKeyConstraint('event_id', name=op.f('pk__processed_events'))
@@ -185,8 +235,8 @@ def upgrade() -> None:
     sa.Column('active', sa.Boolean(), nullable=True),
     sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['platform_id'], ['platforms.id'], name=op.f('fk__shipping_methods__platform_id__platforms')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__shipping_methods'))
     )
@@ -194,8 +244,8 @@ def upgrade() -> None:
     sa.Column('user_id', sa.UUID(), nullable=False),
     sa.Column('role_id', sa.UUID(), nullable=False),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['role_id'], ['roles.id'], name=op.f('fk__user_roles__role_id__roles')),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], name=op.f('fk__user_roles__user_id__users')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__user_roles'))
@@ -215,8 +265,8 @@ def upgrade() -> None:
     sa.Column('provider_message_id', sa.String(length=255), nullable=True),
     sa.Column('error', sa.Text(), nullable=True),
     sa.Column('error_code', sa.String(length=50), nullable=True),
-    sa.Column('sent_at', sa.DateTime(), nullable=True),
-    sa.Column('delivered_at', sa.DateTime(), nullable=True),
+    sa.Column('sent_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('delivered_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('cost', sa.Integer(), nullable=False),
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.ForeignKeyConstraint(['notification_id'], ['notifications.id'], name=op.f('fk__notification_logs__notification_id__notifications')),
@@ -231,8 +281,8 @@ def upgrade() -> None:
     sa.Column('status', sa.String(length=20), nullable=True),
     sa.Column('settings', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['account_id'], ['accounts.id'], name=op.f('fk__shops__account_id__accounts')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__shops')),
     sa.UniqueConstraint('account_id', 'name', name='uq_shop_account_name')
@@ -242,21 +292,21 @@ def upgrade() -> None:
     sa.Column('external_order_id', sa.String(length=255), nullable=True),
     sa.Column('shop_id', sa.UUID(), nullable=False),
     sa.Column('customer_data', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('total_price', sa.Numeric(precision=12, scale=2), nullable=False),
-    sa.Column('shipping_price', sa.Numeric(precision=12, scale=2), nullable=True),
-    sa.Column('discount', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('total_price', sa.Numeric(precision=15, scale=0), nullable=False),
+    sa.Column('shipping_price', sa.Numeric(precision=15, scale=0), nullable=True),
+    sa.Column('discount', sa.Numeric(precision=15, scale=0), nullable=True),
     sa.Column('status', sa.String(length=30), nullable=True),
     sa.Column('notes', sa.Text(), nullable=True),
     sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('confirmed_at', sa.DateTime(), nullable=True),
-    sa.Column('paid_at', sa.DateTime(), nullable=True),
-    sa.Column('shipped_at', sa.DateTime(), nullable=True),
-    sa.Column('delivered_at', sa.DateTime(), nullable=True),
-    sa.Column('completed_at', sa.DateTime(), nullable=True),
-    sa.Column('cancelled_at', sa.DateTime(), nullable=True),
+    sa.Column('confirmed_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('paid_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('shipped_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('delivered_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('cancelled_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['platform_id'], ['platforms.id'], name=op.f('fk__orders__platform_id__platforms')),
     sa.ForeignKeyConstraint(['shop_id'], ['shops.id'], name=op.f('fk__orders__shop_id__shops')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__orders'))
@@ -270,19 +320,26 @@ def upgrade() -> None:
     sa.Column('platform_id', sa.UUID(), nullable=False),
     sa.Column('external_shop_id', sa.String(length=255), nullable=True),
     sa.Column('connection_type', sa.String(length=20), nullable=False),
-    sa.Column('credentials_encrypted', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('credentials', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('webhook_id', sa.String(length=255), nullable=True),
+    sa.Column('webhook_secret', sa.String(length=512), nullable=True),
+    sa.Column('webhook_status', sa.String(length=30), nullable=True),
+    sa.Column('webhook_registered_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('webhook_previous_secret', sa.String(length=512), nullable=True),
+    sa.Column('webhook_secret_rotated_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('webhook_previous_secret_expires_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=True),
-    sa.Column('last_sync_started_at', sa.DateTime(), nullable=True),
-    sa.Column('last_synced_at', sa.DateTime(), nullable=True),
+    sa.Column('last_sync_started_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('last_synced_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('last_error', sa.String(length=1000), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['platform_id'], ['platforms.id'], name=op.f('fk__shop_integrations__platform_id__platforms')),
     sa.ForeignKeyConstraint(['shop_id'], ['shops.id'], name=op.f('fk__shop_integrations__shop_id__shops')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__shop_integrations')),
-    sa.UniqueConstraint('platform_id', 'external_shop_id', name='uq_platform_shop')
+    sa.UniqueConstraint('platform_id', 'external_shop_id', name='uq_platform_shop'),
+    sa.UniqueConstraint('shop_id', name='uq_shop_integration_shop')
     )
     op.create_table('supplier_products',
     sa.Column('shop_id', sa.UUID(), nullable=False),
@@ -295,12 +352,12 @@ def upgrade() -> None:
     sa.Column('basalam_validation_error', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('raw_payload', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('moderation_status', sa.String(length=30), nullable=True),
-    sa.Column('last_synced_at', sa.DateTime(), nullable=True),
-    sa.Column('last_inventory_sync', sa.DateTime(), nullable=True),
-    sa.Column('last_price_sync', sa.DateTime(), nullable=True),
+    sa.Column('last_synced_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('last_inventory_sync', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('last_price_sync', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['category_id'], ['categories.id'], name=op.f('fk__supplier_products__category_id__categories')),
     sa.ForeignKeyConstraint(['shop_id'], ['shops.id'], name=op.f('fk__supplier_products__shop_id__shops')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__supplier_products'))
@@ -317,8 +374,8 @@ def upgrade() -> None:
     sa.Column('delivery_time_estimate', sa.String(length=20), nullable=True),
     sa.Column('is_active', sa.Boolean(), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['shipping_method_id'], ['shipping_methods.id'], name=op.f('fk__supplier_shipping_profiles__shipping_method_id__shipping_methods')),
     sa.ForeignKeyConstraint(['supplier_id'], ['shops.id'], name=op.f('fk__supplier_shipping_profiles__supplier_id__shops')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__supplier_shipping_profiles'))
@@ -332,7 +389,7 @@ def upgrade() -> None:
     sa.Column('error_message', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['integration_id'], ['shop_integrations.id'], name=op.f('fk__integration_logs__integration_id__shop_integrations')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__integration_logs'))
     )
@@ -347,16 +404,38 @@ def upgrade() -> None:
     sa.Column('matched_count', sa.Integer(), nullable=True),
     sa.Column('mismatch_count', sa.Integer(), nullable=True),
     sa.Column('fixed_count', sa.Integer(), nullable=True),
-    sa.Column('started_at', sa.DateTime(), nullable=True),
-    sa.Column('completed_at', sa.DateTime(), nullable=True),
+    sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('errors', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('details', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['integration_id'], ['shop_integrations.id'], name=op.f('fk__inventory_reconciliations__integration_id__shop_integrations')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__inventory_reconciliations'))
     )
+    op.create_table('outgoing_webhook_logs',
+    sa.Column('integration_id', sa.UUID(), nullable=False),
+    sa.Column('event_type', sa.String(length=100), nullable=False),
+    sa.Column('payload', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('url', sa.String(length=2048), nullable=False),
+    sa.Column('status', sa.String(length=20), nullable=True),
+    sa.Column('retry_count', sa.Integer(), nullable=True),
+    sa.Column('max_retries', sa.Integer(), nullable=True),
+    sa.Column('last_attempt_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('next_retry_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('last_error', sa.Text(), nullable=True),
+    sa.Column('response_status_code', sa.Integer(), nullable=True),
+    sa.Column('response_body', sa.Text(), nullable=True),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['integration_id'], ['shop_integrations.id'], name=op.f('fk__outgoing_webhook_logs__integration_id__shop_integrations')),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk__outgoing_webhook_logs'))
+    )
+    op.create_index('idx_outgoing_webhook_logs_integration', 'outgoing_webhook_logs', ['integration_id'], unique=False)
+    op.create_index('idx_outgoing_webhook_logs_retry', 'outgoing_webhook_logs', ['next_retry_at'], unique=False)
+    op.create_index('idx_outgoing_webhook_logs_status', 'outgoing_webhook_logs', ['status'], unique=False)
     op.create_table('product_media',
     sa.Column('product_id', sa.UUID(), nullable=False),
     sa.Column('media_type', sa.String(length=20), nullable=False),
@@ -371,8 +450,8 @@ def upgrade() -> None:
     sa.Column('width', sa.Integer(), nullable=True),
     sa.Column('height', sa.Integer(), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['product_id'], ['supplier_products.id'], name=op.f('fk__product_media__product_id__supplier_products')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__product_media'))
     )
@@ -385,7 +464,7 @@ def upgrade() -> None:
     sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['supplier_product_id'], ['supplier_products.id'], name=op.f('fk__product_validation_logs__supplier_product_id__supplier_products')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__product_validation_logs'))
     )
@@ -399,8 +478,8 @@ def upgrade() -> None:
     sa.Column('sku', sa.String(length=100), nullable=True),
     sa.Column('attributes', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['product_id'], ['supplier_products.id'], name=op.f('fk__product_variants__product_id__supplier_products')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__product_variants'))
     )
@@ -418,8 +497,8 @@ def upgrade() -> None:
     sa.Column('view_count', sa.Integer(), nullable=True),
     sa.Column('order_count', sa.Integer(), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['shop_id'], ['shops.id'], name=op.f('fk__seller_listings__shop_id__shops')),
     sa.ForeignKeyConstraint(['supplier_product_id'], ['supplier_products.id'], name=op.f('fk__seller_listings__supplier_product_id__supplier_products')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__seller_listings'))
@@ -431,17 +510,38 @@ def upgrade() -> None:
     sa.Column('entity_type', sa.String(length=50), nullable=False),
     sa.Column('entity_id', sa.UUID(), nullable=True),
     sa.Column('status', sa.String(length=30), nullable=True),
-    sa.Column('retry_count', sa.String(length=20), nullable=True),
+    sa.Column('retry_count', sa.Integer(), nullable=True),
     sa.Column('error_message', sa.String(length=2000), nullable=True),
-    sa.Column('scheduled_at', sa.DateTime(), nullable=True),
-    sa.Column('started_at', sa.DateTime(), nullable=True),
-    sa.Column('completed_at', sa.DateTime(), nullable=True),
+    sa.Column('scheduled_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['integration_id'], ['shop_integrations.id'], name=op.f('fk__sync_jobs__integration_id__shop_integrations')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__sync_jobs'))
     )
+    op.create_table('sync_states',
+    sa.Column('integration_id', sa.UUID(), nullable=False),
+    sa.Column('entity_type', sa.String(length=50), nullable=False),
+    sa.Column('status', sa.String(length=20), nullable=True),
+    sa.Column('sync_mode', sa.String(length=20), nullable=True),
+    sa.Column('last_sync_timestamp', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('cursor_token', sa.String(length=500), nullable=True),
+    sa.Column('total_synced', sa.Integer(), nullable=True),
+    sa.Column('created_count', sa.Integer(), nullable=True),
+    sa.Column('updated_count', sa.Integer(), nullable=True),
+    sa.Column('failed_count', sa.Integer(), nullable=True),
+    sa.Column('last_error', sa.String(length=2000), nullable=True),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['integration_id'], ['shop_integrations.id'], name=op.f('fk__sync_states__integration_id__shop_integrations')),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk__sync_states')),
+    sa.UniqueConstraint('integration_id', 'entity_type', name='uq_sync_state_integration_entity')
+    )
+    op.create_index('idx_sync_states_last_sync', 'sync_states', ['last_sync_timestamp'], unique=False)
+    op.create_index('idx_sync_states_status', 'sync_states', ['status'], unique=False)
     op.create_table('webhook_events',
     sa.Column('platform_id', sa.UUID(), nullable=False),
     sa.Column('integration_id', sa.UUID(), nullable=True),
@@ -455,12 +555,12 @@ def upgrade() -> None:
     sa.Column('max_retries', sa.Integer(), nullable=True),
     sa.Column('error_message', sa.Text(), nullable=True),
     sa.Column('error_trace', sa.Text(), nullable=True),
-    sa.Column('processed_at', sa.DateTime(), nullable=True),
+    sa.Column('processed_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('entity_type', sa.String(length=50), nullable=True),
     sa.Column('entity_id', sa.String(length=255), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['integration_id'], ['shop_integrations.id'], name=op.f('fk__webhook_events__integration_id__shop_integrations')),
     sa.ForeignKeyConstraint(['platform_id'], ['platforms.id'], name=op.f('fk__webhook_events__platform_id__platforms')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__webhook_events')),
@@ -476,16 +576,16 @@ def upgrade() -> None:
     sa.Column('variant_id', sa.UUID(), nullable=False),
     sa.Column('seller_listing_id', sa.UUID(), nullable=True),
     sa.Column('quantity', sa.Integer(), nullable=False),
-    sa.Column('supplier_price', sa.Numeric(precision=12, scale=2), nullable=False),
-    sa.Column('seller_price', sa.Numeric(precision=12, scale=2), nullable=False),
-    sa.Column('shipping_price', sa.Numeric(precision=12, scale=2), nullable=True),
-    sa.Column('profit', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('supplier_price', sa.Numeric(precision=15, scale=0), nullable=False),
+    sa.Column('seller_price', sa.Numeric(precision=15, scale=0), nullable=False),
+    sa.Column('shipping_price', sa.Numeric(precision=15, scale=0), nullable=True),
+    sa.Column('profit', sa.Numeric(precision=15, scale=0), nullable=True),
     sa.Column('status', sa.String(length=30), nullable=True),
     sa.Column('reject_reason', sa.String(length=255), nullable=True),
-    sa.Column('rejected_at', sa.DateTime(), nullable=True),
+    sa.Column('rejected_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['order_id'], ['orders.id'], name=op.f('fk__order_items__order_id__orders')),
     sa.ForeignKeyConstraint(['seller_listing_id'], ['seller_listings.id'], name=op.f('fk__order_items__seller_listing_id__seller_listings')),
     sa.ForeignKeyConstraint(['supplier_shop_id'], ['shops.id'], name=op.f('fk__order_items__supplier_shop_id__shops')),
@@ -495,17 +595,32 @@ def upgrade() -> None:
     op.create_index('idx_order_items_order', 'order_items', ['order_id'], unique=False)
     op.create_index('idx_order_items_supplier', 'order_items', ['supplier_shop_id'], unique=False)
     op.create_index('idx_order_items_variant', 'order_items', ['variant_id'], unique=False)
+    op.create_table('outgoing_webhook_dlq',
+    sa.Column('outgoing_webhook_log_id', sa.UUID(), nullable=False),
+    sa.Column('failure_reason', sa.Text(), nullable=False),
+    sa.Column('failure_count', sa.Integer(), nullable=True),
+    sa.Column('status', sa.String(length=20), nullable=True),
+    sa.Column('resolved_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('resolved_by', sa.UUID(), nullable=True),
+    sa.Column('resolution_notes', sa.Text(), nullable=True),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['outgoing_webhook_log_id'], ['outgoing_webhook_logs.id'], name=op.f('fk__outgoing_webhook_dlq__outgoing_webhook_log_id__outgoing_webhook_logs')),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk__outgoing_webhook_dlq'))
+    )
+    op.create_index('idx_outgoing_webhook_dlq_status', 'outgoing_webhook_dlq', ['status'], unique=False)
     op.create_table('supplier_variants',
     sa.Column('supplier_product_id', sa.UUID(), nullable=False),
     sa.Column('variant_id', sa.UUID(), nullable=False),
-    sa.Column('cost_price', sa.Numeric(precision=12, scale=2), nullable=False),
+    sa.Column('cost_price', sa.Numeric(precision=15, scale=0), nullable=False),
     sa.Column('inventory', sa.Integer(), nullable=True),
     sa.Column('reserved_inventory', sa.Integer(), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=True),
     sa.Column('raw_payload', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['supplier_product_id'], ['supplier_products.id'], name=op.f('fk__supplier_variants__supplier_product_id__supplier_products')),
     sa.ForeignKeyConstraint(['variant_id'], ['product_variants.id'], name=op.f('fk__supplier_variants__variant_id__product_variants')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__supplier_variants'))
@@ -520,8 +635,8 @@ def upgrade() -> None:
     sa.Column('resolved_by', sa.UUID(), nullable=True),
     sa.Column('resolution_notes', sa.Text(), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['webhook_event_id'], ['webhook_events.id'], name=op.f('fk__webhook_dead_letter__webhook_event_id__webhook_events')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__webhook_dead_letter'))
     )
@@ -529,8 +644,8 @@ def upgrade() -> None:
     op.create_table('webhook_retry_schedules',
     sa.Column('webhook_event_id', sa.UUID(), nullable=False),
     sa.Column('attempt', sa.Integer(), nullable=False),
-    sa.Column('scheduled_at', sa.DateTime(), nullable=False),
-    sa.Column('executed_at', sa.DateTime(), nullable=True),
+    sa.Column('scheduled_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('executed_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=True),
     sa.Column('error', sa.Text(), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
@@ -548,12 +663,12 @@ def upgrade() -> None:
     sa.Column('status', sa.String(length=30), nullable=True),
     sa.Column('resolution', sa.Text(), nullable=True),
     sa.Column('resolved_by', sa.UUID(), nullable=True),
-    sa.Column('resolved_at', sa.DateTime(), nullable=True),
+    sa.Column('resolved_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('outcome', sa.String(length=30), nullable=True),
-    sa.Column('outcome_amount', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('outcome_amount', sa.Numeric(precision=15, scale=0), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['order_item_id'], ['order_items.id'], name=op.f('fk__disputes__order_item_id__order_items')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__disputes'))
     )
@@ -569,7 +684,7 @@ def upgrade() -> None:
     sa.Column('reference_type', sa.String(length=50), nullable=True),
     sa.Column('reason', sa.Text(), nullable=True),
     sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.ForeignKeyConstraint(['variant_id'], ['supplier_variants.id'], name=op.f('fk__inventory_logs__variant_id__supplier_variants')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__inventory_logs'))
@@ -581,12 +696,12 @@ def upgrade() -> None:
     sa.Column('order_item_id', sa.UUID(), nullable=False),
     sa.Column('quantity', sa.Integer(), nullable=False),
     sa.Column('status', sa.String(length=20), nullable=True),
-    sa.Column('expires_at', sa.DateTime(), nullable=False),
-    sa.Column('released_at', sa.DateTime(), nullable=True),
+    sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('released_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('released_reason', sa.String(length=50), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['order_item_id'], ['order_items.id'], name=op.f('fk__inventory_reservations__order_item_id__order_items')),
     sa.ForeignKeyConstraint(['variant_id'], ['supplier_variants.id'], name=op.f('fk__inventory_reservations__variant_id__supplier_variants')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__inventory_reservations'))
@@ -603,7 +718,7 @@ def upgrade() -> None:
     sa.Column('actor_id', sa.UUID(), nullable=True),
     sa.Column('reason', sa.Text(), nullable=True),
     sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.ForeignKeyConstraint(['order_id'], ['orders.id'], name=op.f('fk__order_history__order_id__orders')),
     sa.ForeignKeyConstraint(['order_item_id'], ['order_items.id'], name=op.f('fk__order_history__order_item_id__order_items')),
@@ -612,24 +727,24 @@ def upgrade() -> None:
     op.create_table('payments',
     sa.Column('order_id', sa.UUID(), nullable=False),
     sa.Column('order_item_id', sa.UUID(), nullable=True),
-    sa.Column('seller_paid_amount', sa.Numeric(precision=12, scale=2), nullable=False),
-    sa.Column('supplier_payable_amount', sa.Numeric(precision=12, scale=2), nullable=False),
-    sa.Column('platform_fee', sa.Numeric(precision=12, scale=2), nullable=True),
-    sa.Column('shipping_cost', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('seller_paid_amount', sa.Numeric(precision=15, scale=0), nullable=False),
+    sa.Column('supplier_payable_amount', sa.Numeric(precision=15, scale=0), nullable=False),
+    sa.Column('platform_fee', sa.Numeric(precision=15, scale=0), nullable=True),
+    sa.Column('shipping_cost', sa.Numeric(precision=15, scale=0), nullable=True),
     sa.Column('gateway', sa.String(length=50), nullable=True),
     sa.Column('gateway_transaction_id', sa.String(length=255), nullable=True),
     sa.Column('gateway_refund_id', sa.String(length=255), nullable=True),
     sa.Column('status', sa.String(length=30), nullable=True),
-    sa.Column('paid_at', sa.DateTime(), nullable=True),
-    sa.Column('escrow_started_at', sa.DateTime(), nullable=True),
-    sa.Column('supplier_paid_at', sa.DateTime(), nullable=True),
-    sa.Column('refunded_at', sa.DateTime(), nullable=True),
+    sa.Column('paid_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('escrow_started_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('supplier_paid_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('refunded_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('failure_reason', sa.Text(), nullable=True),
     sa.Column('failure_code', sa.String(length=50), nullable=True),
     sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['order_id'], ['orders.id'], name=op.f('fk__payments__order_id__orders')),
     sa.ForeignKeyConstraint(['order_item_id'], ['order_items.id'], name=op.f('fk__payments__order_item_id__order_items')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__payments'))
@@ -637,16 +752,36 @@ def upgrade() -> None:
     op.create_index('idx_payments_gateway', 'payments', ['gateway_transaction_id'], unique=False)
     op.create_index('idx_payments_order', 'payments', ['order_id'], unique=False)
     op.create_index('idx_payments_status', 'payments', ['status'], unique=False)
+    op.create_table('price_history',
+    sa.Column('variant_id', sa.UUID(), nullable=False),
+    sa.Column('listing_id', sa.UUID(), nullable=True),
+    sa.Column('old_price', sa.Numeric(precision=15, scale=0), nullable=False),
+    sa.Column('new_price', sa.Numeric(precision=15, scale=0), nullable=False),
+    sa.Column('old_supplier_price', sa.Numeric(precision=15, scale=0), nullable=True),
+    sa.Column('new_supplier_price', sa.Numeric(precision=15, scale=0), nullable=True),
+    sa.Column('margin_percent', sa.Numeric(precision=5, scale=2), nullable=True),
+    sa.Column('margin_changed', sa.String(length=20), nullable=True),
+    sa.Column('change_reason', sa.String(length=50), nullable=True),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.ForeignKeyConstraint(['listing_id'], ['seller_listings.id'], name=op.f('fk__price_history__listing_id__seller_listings')),
+    sa.ForeignKeyConstraint(['variant_id'], ['supplier_variants.id'], name=op.f('fk__price_history__variant_id__supplier_variants')),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk__price_history'))
+    )
+    op.create_index('idx_price_history_created', 'price_history', ['created_at'], unique=False)
+    op.create_index('idx_price_history_listing', 'price_history', ['listing_id'], unique=False)
+    op.create_index('idx_price_history_variant', 'price_history', ['variant_id'], unique=False)
     op.create_table('seller_variants',
     sa.Column('listing_id', sa.UUID(), nullable=False),
     sa.Column('supplier_variant_id', sa.UUID(), nullable=False),
-    sa.Column('price', sa.Numeric(precision=12, scale=2), nullable=False),
+    sa.Column('price', sa.Numeric(precision=15, scale=0), nullable=False),
     sa.Column('inventory_cache', sa.Integer(), nullable=True),
-    sa.Column('custom_price', sa.Numeric(precision=12, scale=2), nullable=True),
+    sa.Column('custom_price', sa.Numeric(precision=15, scale=0), nullable=True),
     sa.Column('is_enabled', sa.Boolean(), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['listing_id'], ['seller_listings.id'], name=op.f('fk__seller_variants__listing_id__seller_listings')),
     sa.ForeignKeyConstraint(['supplier_variant_id'], ['supplier_variants.id'], name=op.f('fk__seller_variants__supplier_variant_id__supplier_variants')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__seller_variants'))
@@ -658,15 +793,15 @@ def upgrade() -> None:
     sa.Column('tracking_code', sa.String(length=255), nullable=True),
     sa.Column('carrier', sa.String(length=100), nullable=True),
     sa.Column('status', sa.String(length=30), nullable=True),
-    sa.Column('shipped_at', sa.DateTime(), nullable=True),
-    sa.Column('delivered_at', sa.DateTime(), nullable=True),
-    sa.Column('delivery_confirmed_at', sa.DateTime(), nullable=True),
+    sa.Column('shipped_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('delivered_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('delivery_confirmed_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('delivery_confirmed_by', sa.String(length=20), nullable=True),
-    sa.Column('estimated_delivery', sa.DateTime(), nullable=True),
-    sa.Column('actual_delivery', sa.DateTime(), nullable=True),
+    sa.Column('estimated_delivery', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('actual_delivery', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['order_id'], ['orders.id'], name=op.f('fk__shipments__order_id__orders')),
     sa.ForeignKeyConstraint(['order_item_id'], ['order_items.id'], name=op.f('fk__shipments__order_item_id__order_items')),
     sa.ForeignKeyConstraint(['shipping_method_id'], ['shipping_methods.id'], name=op.f('fk__shipments__shipping_method_id__shipping_methods')),
@@ -677,20 +812,20 @@ def upgrade() -> None:
     op.create_table('refunds',
     sa.Column('order_item_id', sa.UUID(), nullable=False),
     sa.Column('payment_id', sa.UUID(), nullable=True),
-    sa.Column('amount', sa.Numeric(precision=12, scale=2), nullable=False),
+    sa.Column('amount', sa.Numeric(precision=15, scale=0), nullable=False),
     sa.Column('refund_type', sa.String(length=20), nullable=True),
     sa.Column('reason', sa.Text(), nullable=True),
     sa.Column('status', sa.String(length=30), nullable=True),
     sa.Column('requested_by', sa.String(length=20), nullable=True),
     sa.Column('approved_by', sa.UUID(), nullable=True),
     sa.Column('rejected_by', sa.UUID(), nullable=True),
-    sa.Column('approved_at', sa.DateTime(), nullable=True),
-    sa.Column('rejected_at', sa.DateTime(), nullable=True),
-    sa.Column('completed_at', sa.DateTime(), nullable=True),
+    sa.Column('approved_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('rejected_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('gateway_refund_id', sa.String(length=255), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['order_item_id'], ['order_items.id'], name=op.f('fk__refunds__order_item_id__order_items')),
     sa.ForeignKeyConstraint(['payment_id'], ['payments.id'], name=op.f('fk__refunds__payment_id__payments')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__refunds'))
@@ -699,24 +834,44 @@ def upgrade() -> None:
     sa.Column('supplier_id', sa.UUID(), nullable=False),
     sa.Column('order_item_id', sa.UUID(), nullable=False),
     sa.Column('payment_id', sa.UUID(), nullable=True),
-    sa.Column('amount', sa.Numeric(precision=12, scale=2), nullable=False),
+    sa.Column('amount', sa.Numeric(precision=15, scale=0), nullable=False),
     sa.Column('status', sa.String(length=30), nullable=True),
     sa.Column('release_conditions_met', sa.Boolean(), nullable=True),
-    sa.Column('delivery_confirmed_at', sa.DateTime(), nullable=True),
-    sa.Column('dispute_window_ends_at', sa.DateTime(), nullable=True),
+    sa.Column('delivery_confirmed_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('dispute_window_ends_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('payout_method', sa.String(length=50), nullable=True),
     sa.Column('payout_reference', sa.String(length=255), nullable=True),
-    sa.Column('released_at', sa.DateTime(), nullable=True),
-    sa.Column('failed_at', sa.DateTime(), nullable=True),
+    sa.Column('released_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('failed_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('failure_reason', sa.Text(), nullable=True),
     sa.Column('id', sa.Uuid(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['order_item_id'], ['order_items.id'], name=op.f('fk__supplier_payouts__order_item_id__order_items')),
     sa.ForeignKeyConstraint(['payment_id'], ['payments.id'], name=op.f('fk__supplier_payouts__payment_id__payments')),
     sa.ForeignKeyConstraint(['supplier_id'], ['shops.id'], name=op.f('fk__supplier_payouts__supplier_id__shops')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk__supplier_payouts'))
     )
+    # ### Seed platforms ###
+    conn = op.get_bind()
+    now = datetime.now(timezone.utc)
+    _ns = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+    for _code, _name, _ptype in [
+        ("basalam", "Basalam", "marketplace"),
+        ("shopify", "Shopify", "seller_system"),
+        ("woocommerce", "WooCommerce", "seller_system"),
+    ]:
+        conn.execute(text("""
+            INSERT INTO platforms (id, code, name, platform_type, created_at, updated_at)
+            VALUES (:id, :code, :name, :ptype, :now, :now)
+            ON CONFLICT (code) DO NOTHING
+        """), {
+            "id": str(uuid.uuid5(_ns, f"platform-{_code}")),
+            "code": _code,
+            "name": _name,
+            "ptype": _ptype,
+            "now": now,
+        })
     # ### end Alembic commands ###
 
 
@@ -728,6 +883,10 @@ def downgrade() -> None:
     op.drop_index('idx_shipments_order', table_name='shipments')
     op.drop_table('shipments')
     op.drop_table('seller_variants')
+    op.drop_index('idx_price_history_variant', table_name='price_history')
+    op.drop_index('idx_price_history_listing', table_name='price_history')
+    op.drop_index('idx_price_history_created', table_name='price_history')
+    op.drop_table('price_history')
     op.drop_index('idx_payments_status', table_name='payments')
     op.drop_index('idx_payments_order', table_name='payments')
     op.drop_index('idx_payments_gateway', table_name='payments')
@@ -749,6 +908,8 @@ def downgrade() -> None:
     op.drop_index('idx_webhook_dead_letter_status', table_name='webhook_dead_letter')
     op.drop_table('webhook_dead_letter')
     op.drop_table('supplier_variants')
+    op.drop_index('idx_outgoing_webhook_dlq_status', table_name='outgoing_webhook_dlq')
+    op.drop_table('outgoing_webhook_dlq')
     op.drop_index('idx_order_items_variant', table_name='order_items')
     op.drop_index('idx_order_items_supplier', table_name='order_items')
     op.drop_index('idx_order_items_order', table_name='order_items')
@@ -758,6 +919,9 @@ def downgrade() -> None:
     op.drop_index('idx_webhook_events_platform', table_name='webhook_events')
     op.drop_index('idx_webhook_events_entity', table_name='webhook_events')
     op.drop_table('webhook_events')
+    op.drop_index('idx_sync_states_status', table_name='sync_states')
+    op.drop_index('idx_sync_states_last_sync', table_name='sync_states')
+    op.drop_table('sync_states')
     op.drop_table('sync_jobs')
     op.drop_index('idx_seller_listings_supplier', table_name='seller_listings')
     op.drop_index('idx_seller_listings_shop', table_name='seller_listings')
@@ -769,6 +933,10 @@ def downgrade() -> None:
     op.drop_index('idx_product_validation_created', table_name='product_validation_logs')
     op.drop_table('product_validation_logs')
     op.drop_table('product_media')
+    op.drop_index('idx_outgoing_webhook_logs_status', table_name='outgoing_webhook_logs')
+    op.drop_index('idx_outgoing_webhook_logs_retry', table_name='outgoing_webhook_logs')
+    op.drop_index('idx_outgoing_webhook_logs_integration', table_name='outgoing_webhook_logs')
+    op.drop_table('outgoing_webhook_logs')
     op.drop_table('inventory_reconciliations')
     op.drop_index('idx_integration_logs_status', table_name='integration_logs')
     op.drop_index('idx_integration_logs_integration', table_name='integration_logs')
@@ -802,7 +970,10 @@ def downgrade() -> None:
     op.drop_table('notification_preferences')
     op.drop_table('categories')
     op.drop_table('accounts')
-    op.drop_index(op.f('ix__users__email'), table_name='users')
+    op.drop_index('ix_webhook_event_logs_platform', table_name='webhook_event_logs')
+    op.drop_index('ix_webhook_event_logs_created', table_name='webhook_event_logs')
+    op.drop_table('webhook_event_logs')
+    op.drop_index(op.f('ix__users__phone'), table_name='users')
     op.drop_table('users')
     op.drop_index('idx_system_logs_service', table_name='system_logs')
     op.drop_index('idx_system_logs_level', table_name='system_logs')
@@ -817,6 +988,14 @@ def downgrade() -> None:
     op.drop_index('idx_fraud_signals_entity', table_name='fraud_signals')
     op.drop_index('idx_fraud_signals_created', table_name='fraud_signals')
     op.drop_table('fraud_signals')
+    op.drop_index('idx_forbidden_rules_type', table_name='forbidden_product_rules')
+    op.drop_index('idx_forbidden_rules_active', table_name='forbidden_product_rules')
+    op.drop_table('forbidden_product_rules')
+    op.drop_index(op.f('ix__forbidden_keywords__keyword'), table_name='forbidden_keywords')
+    op.drop_index('idx_forbidden_keywords_keyword', table_name='forbidden_keywords')
+    op.drop_index('idx_forbidden_keywords_category', table_name='forbidden_keywords')
+    op.drop_index('idx_forbidden_keywords_active', table_name='forbidden_keywords')
+    op.drop_table('forbidden_keywords')
     op.drop_index('idx_audit_logs_entity', table_name='audit_logs')
     op.drop_index('idx_audit_logs_created', table_name='audit_logs')
     op.drop_index('idx_audit_logs_actor', table_name='audit_logs')

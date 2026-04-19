@@ -54,7 +54,7 @@ class SupplierProduct(Base, UUIDMixin, TimestampMixin):
     category_id = Column(UUID(as_uuid=True), ForeignKey("categories.id"))
     
     has_variants = Column(Boolean, default=False)
-    status = Column(String(30), default="active")  # active, archived, forbidden, pending_review, needs_revision
+    status = Column(String(30), default="active")  # active, draft, archived, forbidden, pending_review, needs_revision
     
     # Basalam-specific
     basalam_validation_error = Column(JSONB)  # Error from Basalam if forbidden

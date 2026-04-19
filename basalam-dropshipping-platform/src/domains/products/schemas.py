@@ -13,6 +13,7 @@ from enum import Enum
 
 class ProductStatus(str, Enum):
     ACTIVE = "active"
+    DRAFT = "draft"
     ARCHIVED = "archived"
     FORBIDDEN = "forbidden"
     PENDING_REVIEW = "pending_review"
