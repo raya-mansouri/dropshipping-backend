@@ -115,7 +115,7 @@ def configure_logging() -> None:
     )
 
 
-def _format_json(obj: Any) -> str:
+def _format_json(obj: Any, **kwargs: Any) -> str:
     import json
 
     return json.dumps(obj, default=str)
