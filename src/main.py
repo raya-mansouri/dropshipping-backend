@@ -39,20 +39,32 @@ async def lifespan(app: FastAPI):
     """Run Alembic migrations on startup, then serve."""
     logger.info("application_starting")
 
-    alembic_cfg = Config("alembic.ini")
-    await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
+    try:
+        alembic_cfg = Config("alembic.ini")
+        await asyncio.wait_for(
+            asyncio.to_thread(command.upgrade, alembic_cfg, "head"),
+            timeout=15,
+        )
+        logger.info("migrations_applied")
+    except Exception as exc:
+        logger.warning("migration_failed", error=str(exc))
 
     # Initialize EventPublisher
-    event_publisher = EventPublisher(
-        kafka_bootstrap_servers=settings.kafka_bootstrap_servers,
-    )
-    app.state.event_publisher = event_publisher
+    event_publisher = None
+    try:
+        event_publisher = EventPublisher(
+            kafka_bootstrap_servers=settings.kafka_bootstrap_servers,
+        )
+        app.state.event_publisher = event_publisher
+    except Exception as exc:
+        logger.warning("event_publisher_init_failed", error=str(exc))
 
     logger.info("application_ready")
     yield
 
     # Cleanup
-    await event_publisher.close()
+    if event_publisher:
+        await event_publisher.close()
     logger.info("application_shutting_down")
 
 
