@@ -344,10 +344,19 @@ class ProductSyncService:
         status_field = payload.get("status", {})
         if isinstance(status_field, dict):
             status_value = status_field.get("value")
-            # Map known numeric status codes
-            status = "active" if status_value == 2976 else str(status_value)
+            # Map Basalam numeric status codes
+            _BASALAM_STATUS_MAP = {
+                2976: "active",       # در دسترس (available)
+                3790: "draft",        # عدم انتشار (unpublished)
+            }
+            status = _BASALAM_STATUS_MAP.get(status_value, "unknown")
+            if status == "unknown":
+                logger.warning(
+                    "unmapped_basalam_status",
+                    status_value=status_value,
+                )
         else:
-            status = str(status_field) if status_field else "active"
+            status = str(status_field) if status_field else "unknown"
 
         # Handle photo: Basalam returns {original: url, id: int}
         photo = payload.get("photo", {})
@@ -540,7 +549,7 @@ class ProductSyncService:
         stmt = pg_insert(SupplierProduct).values(products)
 
         stmt = stmt.on_conflict_do_update(
-            index_elements=["external_product_id"],
+            index_elements=["shop_id", "external_product_id"],
             set_={
                 "title": stmt.excluded.title,
                 "description": stmt.excluded.description,

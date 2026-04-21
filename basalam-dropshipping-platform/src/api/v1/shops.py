@@ -3,6 +3,7 @@ Shop API Endpoints
 ==================
 FastAPI endpoints for shop management
 """
+
 from uuid import UUID
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -28,12 +29,19 @@ from src.domains.shops.schemas import (
     SyncStatusResponse,
 )
 from src.domains.shops.service import ShopService, IntegrationService, SyncService
+from src.core.events import ProductSyncRequested
+from src.core.events.publisher import EventPublisher
+from src.core.config import get_settings as _get_settings
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 
 router = APIRouter(prefix="/shops", tags=["shops"])
 
 
 # ---- Shop CRUD ----
+
 
 @router.post("/", response_model=ShopResponse, status_code=status.HTTP_201_CREATED)
 async def create_shop(
@@ -109,6 +117,7 @@ async def delete_shop(
 
 # ---- Integration Endpoints ----
 
+
 @router.post("/{shop_id}/connect", response_model=ShopIntegrationResponse)
 async def connect_platform(
     shop_id: UUID,
@@ -116,7 +125,7 @@ async def connect_platform(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Connect shop to Basalam platform."""
+    """Connect shop to Basalam platform. One integration per shop."""
     await verify_shop_ownership(shop_id, current_user, session)
 
     service = IntegrationService(session)
@@ -131,7 +140,10 @@ async def connect_platform(
                 },
             )
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            error_msg = str(e)
+            if "already has an active integration" in error_msg:
+                raise HTTPException(status_code=409, detail=error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
     return integration
 
 
@@ -141,7 +153,7 @@ async def list_integrations(
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """List all integrations for a shop."""
+    """List integrations for a shop (max 1 per shop)."""
     await verify_shop_ownership(shop_id, current_user, session)
     service = IntegrationService(session)
     return await service.list_integrations(shop_id)
@@ -176,6 +188,7 @@ async def disconnect_integration(
 
 # ---- OAuth Endpoints ----
 
+
 @router.post("/{shop_id}/oauth/start", response_model=OAuthStartResponse)
 async def start_oauth(
     shop_id: UUID,
@@ -194,7 +207,10 @@ async def start_oauth(
                 platform_code=oauth_data.platform_code.value,
             )
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            error_msg = str(e)
+            if "already has an active integration" in error_msg:
+                raise HTTPException(status_code=409, detail=error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
 
     return OAuthStartResponse(
         authorize_url=result["authorize_url"],
@@ -228,6 +244,7 @@ async def oauth_callback(
 
 # ---- Sync Endpoints ----
 
+
 @router.post("/{shop_id}/sync/products")
 async def sync_products(
     shop_id: UUID,
@@ -247,6 +264,34 @@ async def sync_products(
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+    # Publish ProductSyncRequested event for the specific integration
+    _settings = _get_settings()
+    _publisher = EventPublisher(
+        kafka_bootstrap_servers=_settings.kafka_bootstrap_servers
+    )
+    _sync_event = ProductSyncRequested(
+        integration_id=integration_id,
+        full_sync=True,
+        triggered_by="manual",
+        job_id=job.id,
+    )
+    try:
+        await _publisher.publish(
+            topic="sync.requested", event=_sync_event, route_by_type=True
+        )
+    except Exception as e:
+        logger.error(
+            "sync_event_publish_failed",
+            integration_id=str(integration_id),
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Sync job created but event dispatch failed. The job will be retried.",
+        )
+    finally:
+        await _publisher.close()
 
     return SyncJobResponse.model_validate(job)
 

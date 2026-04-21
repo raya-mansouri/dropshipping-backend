@@ -105,7 +105,7 @@ class InventorySyncService:
         if not integration:
             raise ValueError(f"Integration {integration_id} not found")
 
-        credentials = integration.credentials_encrypted or {}
+        credentials = integration.credentials or {}
         client = BasalamClient(
             client_id=credentials.get("client_id", ""),
             client_secret=credentials.get("client_secret", ""),

@@ -6,54 +6,26 @@ Consumes order events and triggers business operations:
 - Audit trail recording
 - Shipment tracking updates
 """
-import json
+
 import structlog
 from datetime import datetime, timezone
 from typing import Dict, Any
 from uuid import uuid4
 
-from aiokafka import AIOKafkaConsumer
-
+from src.workers.consumers.base import DLQAwareConsumer
 from src.core.database import async_session_maker
 
 logger = structlog.get_logger("workers.order_consumer")
 
 
-class OrderConsumer:
-    def __init__(
-        self,
-        bootstrap_servers: str,
-        group_id: str = "order-consumer-group",
-    ):
-        self.bootstrap_servers = bootstrap_servers
-        self.group_id = group_id
-        self.consumer: AIOKafkaConsumer = None
+class OrderConsumer(DLQAwareConsumer):
+    topic = "order.created"
+    group_id = "order-consumer-group"
 
-    async def start(self):
-        self.consumer = AIOKafkaConsumer(
-            "order.created",
-            bootstrap_servers=self.bootstrap_servers,
-            group_id=self.group_id,
-            value_deserializer=lambda m: json.loads(m.decode("utf-8")),
-            auto_offset_reset="earliest",
-            enable_auto_commit=True,
-        )
-        await self.consumer.start()
-        logger.info("Order consumer started")
-
-    async def stop(self):
-        if self.consumer:
-            await self.consumer.stop()
-            logger.info("Order consumer stopped")
-
-    async def consume(self):
-        async for message in self.consumer:
-            try:
-                event = message.value
-                event_type = event.get("event_type")
-                await self._handle_event(event_type, event)
-            except Exception as e:
-                logger.error("Error processing order event", error=str(e), exc_info=True)
+    async def process_message(self, message) -> None:
+        event = message.value
+        event_type = event.get("event_type")
+        await self._handle_event(event_type, event)
 
     async def _handle_event(self, event_type: str, event: Dict[str, Any]):
         handlers = {
@@ -90,26 +62,28 @@ class OrderConsumer:
         )
 
         async with async_session_maker() as session:
-            try:
-                from src.integrations.notification.manager import create_notification_manager
-                from src.integrations.notification.ports import (
-                    NotificationChannel,
-                    NotificationRecipient,
-                    NotificationContent,
+            from src.integrations.notification.manager import (
+                create_notification_manager,
+            )
+            from src.integrations.notification.ports import (
+                NotificationChannel,
+                NotificationRecipient,
+                NotificationContent,
+            )
+
+            notification_mgr = create_notification_manager({})
+
+            if shop_id:
+                from src.domains.shops.models import Shop
+                from sqlalchemy import select
+
+                shop_result = await session.execute(
+                    select(Shop).where(Shop.id == shop_id)
                 )
+                shop = shop_result.scalar_one_or_none()
 
-                notification_mgr = create_notification_manager({})
-
-                if shop_id:
-                    from src.domains.shops.models import Shop
-                    from sqlalchemy import select
-
-                    shop_result = await session.execute(
-                        select(Shop).where(Shop.id == shop_id)
-                    )
-                    shop = shop_result.scalar_one_or_none()
-
-                    if shop:
+                if shop:
+                    try:
                         recipient = NotificationRecipient(user_id=shop.account_id)
                         content = NotificationContent(
                             title=f"New Order #{order_id}",
@@ -127,14 +101,14 @@ class OrderConsumer:
                             recipient=recipient,
                             content=content,
                         )
+                    except Exception as e:
+                        logger.error(
+                            "order_created_notification_failed",
+                            order_id=str(order_id),
+                            error=str(e),
+                        )
 
-                await session.commit()
-            except Exception as e:
-                logger.error(
-                    "Failed to send OrderCreated notification",
-                    order_id=str(order_id),
-                    error=str(e),
-                )
+            await session.commit()
 
     async def _handle_order_paid(self, event: Dict[str, Any]):
         metadata = event.get("metadata", {})
@@ -154,33 +128,36 @@ class OrderConsumer:
         )
 
         async with async_session_maker() as session:
-            try:
-                from src.integrations.notification.manager import create_notification_manager
-                from src.integrations.notification.ports import (
-                    NotificationChannel,
-                    NotificationRecipient,
-                    NotificationContent,
+            from src.integrations.notification.manager import (
+                create_notification_manager,
+            )
+            from src.integrations.notification.ports import (
+                NotificationChannel,
+                NotificationRecipient,
+                NotificationContent,
+            )
+            from src.domains.orders.models import Order, OrderItem
+            from src.domains.shops.models import Shop
+            from sqlalchemy import select
+
+            notification_mgr = create_notification_manager({})
+
+            order_result = await session.execute(
+                select(Order).where(Order.id == order_id)
+            )
+            order = order_result.scalar_one_or_none()
+
+            if order:
+                # Notify seller
+                shop_result = await session.execute(
+                    select(Shop).where(Shop.id == order.shop_id)
                 )
-                from src.domains.orders.models import Order, OrderItem
-                from src.domains.shops.models import Shop
-                from sqlalchemy import select
-
-                notification_mgr = create_notification_manager({})
-
-                # Fetch order to get seller shop_id
-                order_result = await session.execute(
-                    select(Order).where(Order.id == order_id)
-                )
-                order = order_result.scalar_one_or_none()
-
-                if order:
-                    # Notify seller
-                    shop_result = await session.execute(
-                        select(Shop).where(Shop.id == order.shop_id)
-                    )
-                    seller_shop = shop_result.scalar_one_or_none()
-                    if seller_shop:
-                        recipient = NotificationRecipient(user_id=seller_shop.account_id)
+                seller_shop = shop_result.scalar_one_or_none()
+                if seller_shop:
+                    try:
+                        recipient = NotificationRecipient(
+                            user_id=seller_shop.account_id
+                        )
                         content = NotificationContent(
                             title=f"Payment Confirmed for Order #{order_id}",
                             body=f"Payment of {amount} received for order #{order_id}.",
@@ -197,30 +174,38 @@ class OrderConsumer:
                             recipient=recipient,
                             content=content,
                         )
-
-                    # Notify each distinct supplier — batch load all supplier shops
-                    items_result = await session.execute(
-                        select(OrderItem).where(OrderItem.order_id == order_id)
-                    )
-                    items = items_result.scalars().all()
-                    supplier_ids = {item.supplier_shop_id for item in items}
-
-                    # Single query instead of N queries (fixes N+1)
-                    if supplier_ids:
-                        shops_result = await session.execute(
-                            select(Shop).where(Shop.id.in_(supplier_ids))
+                    except Exception as e:
+                        logger.error(
+                            "order_paid_seller_notification_failed",
+                            order_id=str(order_id),
+                            error=str(e),
                         )
-                        shop_by_id = {s.id: s for s in shops_result.scalars().all()}
-                    else:
-                        shop_by_id = {}
 
-                    for supplier_id in supplier_ids:
-                        supplier_shop = shop_by_id.get(supplier_id)
-                        if supplier_shop:
+                # Notify each distinct supplier
+                items_result = await session.execute(
+                    select(OrderItem).where(OrderItem.order_id == order_id)
+                )
+                items = items_result.scalars().all()
+                supplier_ids = {item.supplier_shop_id for item in items}
+
+                if supplier_ids:
+                    shops_result = await session.execute(
+                        select(Shop).where(Shop.id.in_(supplier_ids))
+                    )
+                    shop_by_id = {s.id: s for s in shops_result.scalars().all()}
+                else:
+                    shop_by_id = {}
+
+                for supplier_id in supplier_ids:
+                    supplier_shop = shop_by_id.get(supplier_id)
+                    if supplier_shop:
+                        try:
                             supplier_items = [
                                 i for i in items if i.supplier_shop_id == supplier_id
                             ]
-                            recipient = NotificationRecipient(user_id=supplier_shop.account_id)
+                            recipient = NotificationRecipient(
+                                user_id=supplier_shop.account_id
+                            )
                             content = NotificationContent(
                                 title=f"New Order to Fulfill #{order_id}",
                                 body=(
@@ -239,14 +224,15 @@ class OrderConsumer:
                                 recipient=recipient,
                                 content=content,
                             )
+                        except Exception as e:
+                            logger.error(
+                                "order_paid_supplier_notification_failed",
+                                supplier_id=str(supplier_id),
+                                order_id=str(order_id),
+                                error=str(e),
+                            )
 
-                await session.commit()
-            except Exception as e:
-                logger.error(
-                    "Failed to process OrderPaid notifications",
-                    order_id=str(order_id),
-                    error=str(e),
-                )
+            await session.commit()
 
     async def _handle_order_cancelled(self, event: Dict[str, Any]):
         metadata = event.get("metadata", {})
@@ -266,31 +252,33 @@ class OrderConsumer:
         )
 
         async with async_session_maker() as session:
-            try:
-                from src.integrations.notification.manager import create_notification_manager
-                from src.integrations.notification.ports import (
-                    NotificationChannel,
-                    NotificationRecipient,
-                    NotificationContent,
+            from src.integrations.notification.manager import (
+                create_notification_manager,
+            )
+            from src.integrations.notification.ports import (
+                NotificationChannel,
+                NotificationRecipient,
+                NotificationContent,
+            )
+            from src.domains.orders.models import Order
+            from src.domains.shops.models import Shop
+            from sqlalchemy import select
+
+            notification_mgr = create_notification_manager({})
+
+            order_result = await session.execute(
+                select(Order).where(Order.id == order_id)
+            )
+            order = order_result.scalar_one_or_none()
+
+            if order:
+                shop_result = await session.execute(
+                    select(Shop).where(Shop.id == order.shop_id)
                 )
-                from src.domains.orders.models import Order
-                from src.domains.shops.models import Shop
-                from sqlalchemy import select
+                shop = shop_result.scalar_one_or_none()
 
-                notification_mgr = create_notification_manager({})
-
-                order_result = await session.execute(
-                    select(Order).where(Order.id == order_id)
-                )
-                order = order_result.scalar_one_or_none()
-
-                if order:
-                    shop_result = await session.execute(
-                        select(Shop).where(Shop.id == order.shop_id)
-                    )
-                    shop = shop_result.scalar_one_or_none()
-
-                    if shop:
+                if shop:
+                    try:
                         recipient = NotificationRecipient(user_id=shop.account_id)
                         content = NotificationContent(
                             title=f"Order Cancelled #{order_id}",
@@ -312,14 +300,14 @@ class OrderConsumer:
                             recipient=recipient,
                             content=content,
                         )
+                    except Exception as e:
+                        logger.error(
+                            "order_cancelled_notification_failed",
+                            order_id=str(order_id),
+                            error=str(e),
+                        )
 
-                await session.commit()
-            except Exception as e:
-                logger.error(
-                    "Failed to process OrderCancelled notification",
-                    order_id=str(order_id),
-                    error=str(e),
-                )
+            await session.commit()
 
     async def _handle_order_status_changed(self, event: Dict[str, Any]):
         metadata = event.get("metadata", {})
@@ -341,37 +329,30 @@ class OrderConsumer:
         )
 
         async with async_session_maker() as session:
-            try:
-                from src.domains.orders.repository import OrderHistoryRepository
+            from src.domains.orders.repository import OrderHistoryRepository
 
-                history_repo = OrderHistoryRepository(session)
+            history_repo = OrderHistoryRepository(session)
 
-                reason = metadata.get("reason")
-                history_data = {
-                    "id": uuid4(),
-                    "order_id": order_id,
-                    "from_status": old_status,
-                    "to_status": new_status,
-                    "actor_type": actor or "system",
-                    "reason": reason or f"Status changed from {old_status} to {new_status}",
-                    "extra_data": metadata,
-                    "created_at": datetime.now(timezone.utc),
-                }
-                await history_repo.create(history_data)
-                await session.commit()
+            reason = metadata.get("reason")
+            history_data = {
+                "id": uuid4(),
+                "order_id": order_id,
+                "from_status": old_status,
+                "to_status": new_status,
+                "actor_type": actor or "system",
+                "reason": reason or f"Status changed from {old_status} to {new_status}",
+                "extra_data": metadata,
+                "created_at": datetime.now(timezone.utc),
+            }
+            await history_repo.create(history_data)
+            await session.commit()
 
-                logger.info(
-                    "Recorded order status change in audit trail",
-                    order_id=str(order_id),
-                    old_status=old_status,
-                    new_status=new_status,
-                )
-            except Exception as e:
-                logger.error(
-                    "Failed to record OrderStatusChanged audit",
-                    order_id=str(order_id),
-                    error=str(e),
-                )
+            logger.info(
+                "Recorded order status change in audit trail",
+                order_id=str(order_id),
+                old_status=old_status,
+                new_status=new_status,
+            )
 
     async def _handle_order_shipped(self, event: Dict[str, Any]):
         metadata = event.get("metadata", {})
@@ -393,31 +374,33 @@ class OrderConsumer:
         )
 
         async with async_session_maker() as session:
-            try:
-                from src.integrations.notification.manager import create_notification_manager
-                from src.integrations.notification.ports import (
-                    NotificationChannel,
-                    NotificationRecipient,
-                    NotificationContent,
+            from src.integrations.notification.manager import (
+                create_notification_manager,
+            )
+            from src.integrations.notification.ports import (
+                NotificationChannel,
+                NotificationRecipient,
+                NotificationContent,
+            )
+            from src.domains.orders.models import Order
+            from src.domains.shops.models import Shop
+            from sqlalchemy import select
+
+            notification_mgr = create_notification_manager({})
+
+            order_result = await session.execute(
+                select(Order).where(Order.id == order_id)
+            )
+            order = order_result.scalar_one_or_none()
+
+            if order:
+                shop_result = await session.execute(
+                    select(Shop).where(Shop.id == order.shop_id)
                 )
-                from src.domains.orders.models import Order
-                from src.domains.shops.models import Shop
-                from sqlalchemy import select
+                shop = shop_result.scalar_one_or_none()
 
-                notification_mgr = create_notification_manager({})
-
-                order_result = await session.execute(
-                    select(Order).where(Order.id == order_id)
-                )
-                order = order_result.scalar_one_or_none()
-
-                if order:
-                    shop_result = await session.execute(
-                        select(Shop).where(Shop.id == order.shop_id)
-                    )
-                    shop = shop_result.scalar_one_or_none()
-
-                    if shop:
+                if shop:
+                    try:
                         tracking_info = (
                             f"Tracking code: {tracking_code}, Carrier: {carrier}"
                             if tracking_code
@@ -440,11 +423,11 @@ class OrderConsumer:
                             recipient=recipient,
                             content=content,
                         )
+                    except Exception as e:
+                        logger.error(
+                            "order_shipped_notification_failed",
+                            order_id=str(order_id),
+                            error=str(e),
+                        )
 
-                await session.commit()
-            except Exception as e:
-                logger.error(
-                    "Failed to process OrderShipped notification",
-                    order_id=str(order_id),
-                    error=str(e),
-                )
+            await session.commit()

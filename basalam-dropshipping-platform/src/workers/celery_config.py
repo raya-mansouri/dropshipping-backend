@@ -1,6 +1,28 @@
+import asyncio
+
 from celery import Celery
 
 from src.core.config import get_settings
+
+
+def run_async(coro):
+    """Run an async coroutine from synchronous Celery tasks.
+
+    Handles both fresh processes (prefork pool) and existing event loops
+    (gevent/eventlet/solo pools).
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
+    return asyncio.run(coro)
+
 
 REDIS_URL = get_settings().redis_url
 CELERY_BROKER_URL = get_settings().celery_broker_url or REDIS_URL
@@ -14,8 +36,15 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-    task_soft_time_limit=300,  # 5 min soft limit — task receives SoftTimeLimitExceeded
-    task_time_limit=600,      # 10 min hard limit — worker process is terminated
+    task_soft_time_limit=300,
+    task_time_limit=600,
+    include=[
+        "src.workers.tasks.inventory_tasks",
+        "src.workers.tasks.product_tasks",
+        "src.workers.tasks.order_tasks",
+        "src.workers.tasks.outgoing_webhook_retry",
+        "src.workers.tasks.webhook_tasks",
+    ],
     beat_schedule={
         "cleanup-expired-reservations": {
             "task": "src.workers.tasks.inventory_tasks.cleanup_expired_reservations",

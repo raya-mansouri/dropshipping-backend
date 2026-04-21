@@ -1,19 +1,15 @@
 """
 Webhook Secret Service
 ======================
-Secure generation, encryption, and rotation of webhook secrets.
-
-Uses Fernet symmetric encryption for storing webhook secrets.
+Secret generation, HMAC signature verification, and rotation for webhooks.
 """
+
 import hashlib
 import hmac
 import secrets
 import structlog
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
-from cryptography.fernet import Fernet, InvalidToken
-
-from src.core.config import get_settings
 
 
 logger = structlog.get_logger(__name__)
@@ -21,39 +17,11 @@ logger = structlog.get_logger(__name__)
 
 class WebhookSecretService:
     """
-    Manages webhook secret lifecycle: generation, encryption, rotation.
-
-    Secrets are 32-byte URL-safe tokens, encrypted with Fernet before storage.
+    Manages webhook secret lifecycle: generation, rotation, and HMAC verification.
     """
 
     # How long both old and new secrets are valid during rotation
     ROTATION_OVERLAP_PERIOD = timedelta(hours=24)
-
-    def __init__(self, encryption_key: Optional[str] = None):
-        """
-        Initialize the service with encryption key.
-
-        Args:
-            encryption_key: Fernet key (base64-encoded 32-byte key).
-                           If not provided, reads from settings.
-        """
-        settings = get_settings()
-        key = encryption_key or settings.webhook_secret_encryption_key.get_secret_value()
-
-        if not key:
-            raise ValueError(
-                "webhook_secret_encryption_key not configured. "
-                "Generate one with: from cryptography.fernet import Fernet; Fernet.generate_key()"
-            )
-
-        # Validate key format before using it (prevents runtime errors on first encrypt/decrypt)
-        try:
-            self._fernet = Fernet(key.encode() if isinstance(key, str) else key)
-        except (ValueError, TypeError) as e:
-            raise ValueError(
-                f"Invalid Fernet key format: {e}. "
-                "Generate a valid key with: from cryptography.fernet import Fernet; Fernet.generate_key()"
-            ) from e
 
     def generate_secret(self) -> str:
         """
@@ -64,67 +32,10 @@ class WebhookSecretService:
         """
         return secrets.token_urlsafe(32)
 
-    def encrypt_for_storage(self, secret: str) -> str:
-        """
-        Encrypt a webhook secret for database storage.
-
-        Args:
-            secret: The plaintext secret to encrypt
-
-        Returns:
-            Fernet-encrypted string (base64)
-        """
-        if not secret:
-            raise ValueError("Secret cannot be empty")
-
-        encrypted = self._fernet.encrypt(secret.encode())
-        return encrypted.decode()
-
-    def decrypt_for_verification(self, encrypted_secret: str) -> str:
-        """
-        Decrypt a webhook secret for signature verification.
-
-        Args:
-            encrypted_secret: The Fernet-encrypted secret from storage
-
-        Returns:
-            The plaintext secret
-
-        Raises:
-            InvalidToken: If the secret cannot be decrypted (tampered or wrong key)
-        """
-        if not encrypted_secret:
-            raise ValueError("Encrypted secret cannot be empty")
-
-        try:
-            decrypted = self._fernet.decrypt(encrypted_secret.encode())
-            return decrypted.decode()
-        except InvalidToken as e:
-            logger.error("Failed to decrypt webhook secret: invalid token")
-            raise
-
-    def decrypt_from_storage(self, encrypted_data: str) -> str:
-        """
-        Decrypt Fernet-encrypted data from database storage.
-
-        Alias for decrypt_for_verification(). Used by IntegrationService
-        to decrypt OAuth credentials stored in credentials_encrypted.
-
-        Args:
-            encrypted_data: The Fernet-encrypted string from storage
-
-        Returns:
-            The plaintext string
-
-        Raises:
-            InvalidToken: If the data cannot be decrypted (wrong key or tampered)
-        """
-        return self.decrypt_for_verification(encrypted_data)
-
     def rotate_secret(
         self,
-        current_encrypted: Optional[str],
-    ) -> Tuple[str, str, datetime]:
+        current_secret: Optional[str],
+    ) -> Tuple[str, datetime]:
         """
         Generate a new secret for rotation.
 
@@ -135,17 +46,15 @@ class WebhookSecretService:
         3. Removing old secret after overlap expires
 
         Args:
-            current_encrypted: The current encrypted secret (can be None for new)
+            current_secret: The current secret (can be None for new)
 
         Returns:
-            Tuple of (new_secret_plaintext, new_secret_encrypted, old_secret_expires_at)
+            Tuple of (new_secret, old_secret_expires_at)
         """
         new_secret = self.generate_secret()
-        new_encrypted = self.encrypt_for_storage(new_secret)
-
         expires_at = datetime.now(timezone.utc) + self.ROTATION_OVERLAP_PERIOD
 
-        if current_encrypted:
+        if current_secret:
             logger.info(
                 "secret_rotation_initiated",
                 old_secret_expires_at=str(expires_at),
@@ -153,7 +62,7 @@ class WebhookSecretService:
         else:
             logger.info("Generating initial webhook secret")
 
-        return new_secret, new_encrypted, expires_at
+        return new_secret, expires_at
 
     def compute_signature(
         self,
@@ -178,7 +87,7 @@ class WebhookSecretService:
         else:
             signed_payload = payload
 
-        signature = hmac.new(
+        signature = hmac.HMAC(
             secret.encode(),
             signed_payload,
             hashlib.sha256,
@@ -211,7 +120,6 @@ class WebhookSecretService:
         Returns:
             Tuple of (is_valid, error_message)
         """
-        import time
 
         if not signature_header:
             return False, "Missing signature header"
@@ -282,7 +190,11 @@ class WebhookSecretService:
 
         # Compute expected signature
         expected_sig = self.compute_signature(secret, payload, timestamp)
-        expected_hash = expected_sig.split(",sha256=")[1] if ",sha256=" in expected_sig else expected_sig.replace("sha256=", "")
+        expected_hash = (
+            expected_sig.split(",sha256=")[1]
+            if ",sha256=" in expected_sig
+            else expected_sig.replace("sha256=", "")
+        )
 
         if hmac.compare_digest(expected_hash, parts["sha256"]):
             return True, None
@@ -294,7 +206,7 @@ class WebhookSecretService:
         """Verify legacy sha1=<hex> format (for backward compatibility)."""
 
         provided_hash = signature_header.replace("sha1=", "")
-        expected_hash = hmac.new(
+        expected_hash = hmac.HMAC(
             secret.encode(),
             payload,
             hashlib.sha1,

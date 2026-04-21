@@ -1,4 +1,3 @@
-import asyncio
 import structlog
 import uuid
 from datetime import datetime, timezone
@@ -8,11 +7,12 @@ from celery import shared_task
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.database import AsyncSessionLocal
+from src.core.database import async_session_maker
 from src.domains.inventory.models import InventoryReservation
 from src.domains.inventory.repository import (
     InventoryReservationRepository,
 )
+from src.workers.celery_config import run_async
 from src.domains.inventory.service.reservation_service import ReservationService
 from src.domains.inventory.service.sync_service import InventorySyncService
 from src.domains.shops.repository import ShopIntegrationRepository
@@ -21,7 +21,7 @@ logger = structlog.get_logger(__name__)
 
 
 async def get_session() -> AsyncSession:
-    async with AsyncSessionLocal() as session:
+    async with async_session_maker() as session:
         yield session
 
 
@@ -55,7 +55,7 @@ def cleanup_expired_reservations(self):
     logger.info("Starting cleanup of expired inventory reservations")
 
     async def _cleanup():
-        async with AsyncSessionLocal() as session:
+        async with async_session_maker() as session:
             reservation_repo = InventoryReservationRepository(session)
             expired_reservations = await reservation_repo.get_expired()
 
@@ -94,7 +94,7 @@ def cleanup_expired_reservations(self):
             )
             return {"processed": processed, "released": released}
 
-    result = asyncio.run(_cleanup())
+    result = run_async(_cleanup())
     return result
 
 
@@ -105,7 +105,7 @@ def reconcile_inventory(self, integration_id: str = None):
     async def _reconcile():
         from src.domains.shops.models import ShopIntegration
 
-        async with AsyncSessionLocal() as session:
+        async with async_session_maker() as session:
             if integration_id:
                 integration_ids = [uuid.UUID(integration_id)]
             else:
@@ -162,7 +162,7 @@ def sync_inventory(self, integration_id: str = None):
     async def _sync():
         from src.domains.shops.models import ShopIntegration
 
-        async with AsyncSessionLocal() as session:
+        async with async_session_maker() as session:
             if integration_id:
                 integration_ids = [uuid.UUID(integration_id)]
             else:
@@ -221,5 +221,5 @@ def sync_inventory(self, integration_id: str = None):
 
             return results
 
-    result = asyncio.run(_sync())
+    result = run_async(_sync())
     return result

@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_db
 from src.core.repository.unit_of_work import UnitOfWork
 from src.domains.shops.repository import ShopIntegrationRepository, PlatformRepository
+from src.domains.shops.service.webhook_secret_service import get_webhook_secret_service
 from src.domains.webhooks.repository.webhook_event import WebhookEventRepository
 from src.integrations.webhooks.security import (
     get_ip_validator,
@@ -223,28 +224,16 @@ async def verify_signature(
     """
     Verify webhook signature.
 
-    Returns the decrypted secret for potential reuse.
+    Returns the secret for potential reuse.
     Raises HTTPException if signature is invalid.
     """
-    from src.domains.shops.service.webhook_secret_service import get_webhook_secret_service
-
-    secret_service = get_webhook_secret_service()
-
-    if not integration.webhook_secret_encrypted:
+    if not integration.webhook_secret:
         raise HTTPException(
             status_code=500,
             detail="Webhook secret not configured for this integration"
         )
 
-    # Decrypt secret
-    try:
-        secret = secret_service.decrypt_for_verification(integration.webhook_secret_encrypted)
-    except Exception as e:
-        logger.error("failed_to_decrypt_webhook_secret", error=str(e))
-        raise HTTPException(
-            status_code=500,
-            detail="Webhook secret decryption failed"
-        )
+    secret = integration.webhook_secret
 
     # Get signature from headers
     signature_header = (
@@ -268,7 +257,8 @@ async def verify_signature(
             detail="Missing webhook signature"
         )
 
-    # Verify
+    # Verify HMAC signature
+    secret_service = get_webhook_secret_service()
     is_valid, error = secret_service.verify_signature(
         secret=secret,
         payload=raw_body,
@@ -432,11 +422,7 @@ async def receive_webhook(
     record_webhook_received(platform_code, event_type)
 
     # Build registry with processors wired to this session + secret
-    secret_for_processor = (
-        integration.webhook_secret_encrypted
-        if integration.webhook_secret_encrypted
-        else ""
-    )
+    secret_for_processor = integration.webhook_secret or ""
     processor_registry = _build_processor_registry(
         secret=secret_for_processor, session=session
     )

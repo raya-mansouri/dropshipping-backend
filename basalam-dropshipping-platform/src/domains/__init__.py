@@ -19,6 +19,7 @@ DOMAIN_MODEL_MODULES = [
     "src.domains.orders.models",
     "src.domains.payments.models",
     "src.domains.products.models",
+    "src.domains.pricing.models",
     "src.domains.product_validation.models",
     "src.domains.shops.models",
     "src.domains.system_logs.models",

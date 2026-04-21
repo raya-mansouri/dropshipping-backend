@@ -12,7 +12,7 @@ from celery import shared_task
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.workers.celery_config import celery_app
+from src.workers.celery_config import celery_app, run_async
 from src.core.database import async_session_maker
 from src.domains.webhooks.models import (
     OutgoingWebhookLog,
@@ -47,7 +47,7 @@ def process_webhook_retry(self, webhook_log_id: str):
     """
     import asyncio
 
-    return asyncio.run(_process_webhook_retry_async(webhook_log_id))
+    return run_async(_process_webhook_retry_async(webhook_log_id))
 
 
 async def _process_webhook_retry_async(webhook_log_id: str) -> dict:
@@ -234,7 +234,7 @@ def process_pending_retries():
     This task is typically called by Celery beat every minute.
     """
     import asyncio
-    return asyncio.run(_process_pending_retries_async())
+    return run_async(_process_pending_retries_async())
 
 
 async def _process_pending_retries_async() -> dict:
@@ -271,7 +271,7 @@ def cleanup_old_webhook_logs():
     Removes entries older than 30 days.
     """
     import asyncio
-    return asyncio.run(_cleanup_old_webhook_logs_async())
+    return run_async(_cleanup_old_webhook_logs_async())
 
 
 async def _cleanup_old_webhook_logs_async() -> dict:

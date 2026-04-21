@@ -4,7 +4,7 @@ Sync Job Repository
 Repository for SyncJob model operations, extending BaseRepository.
 """
 
-from typing import Optional, List
+from typing import Literal, Optional, List
 from datetime import datetime
 import uuid
 from sqlalchemy import select, update
@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.repository.base import BaseRepository
 from ..models import SyncJob
+
+SyncJobStatus = Literal["pending", "running", "completed", "failed"]
 
 
 class SyncJobRepository(BaseRepository[SyncJob]):
@@ -45,6 +47,28 @@ class SyncJobRepository(BaseRepository[SyncJob]):
         """Update sync job status."""
         await self.session.execute(
             update(SyncJob).where(SyncJob.id == id).values(status=status)
+        )
+        await self.session.flush()
+        return await self.get_by_id(id)
+
+    async def update_job_lifecycle(
+        self,
+        id: uuid.UUID,
+        status: SyncJobStatus,
+        started_at: Optional[datetime] = None,
+        completed_at: Optional[datetime] = None,
+        error_message: Optional[str] = None,
+    ) -> Optional[SyncJob]:
+        """Update sync job status with lifecycle timestamps."""
+        values: dict = {"status": status}
+        if started_at is not None:
+            values["started_at"] = started_at
+        if completed_at is not None:
+            values["completed_at"] = completed_at
+        if error_message is not None:
+            values["error_message"] = error_message
+        await self.session.execute(
+            update(SyncJob).where(SyncJob.id == id).values(**values)
         )
         await self.session.flush()
         return await self.get_by_id(id)

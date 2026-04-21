@@ -45,6 +45,7 @@ class TopicRouter:
         self.register_route("ProductStatusChanged", "product.updated")
         self.register_route("ProductForbid", "product.updated")
         self.register_route("ProductSynced", "product.updated")
+        self.register_route("ProductSyncRequested", "sync.requested")
 
 
 class EventStore:

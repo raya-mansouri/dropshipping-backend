@@ -29,12 +29,17 @@ logger = structlog.get_logger(__name__)
 
 # Webhook events to subscribe per platform (Basalam uses numeric event_ids)
 PLATFORM_WEBHOOK_EVENTS = {
-    "basalam": [8, 5, 7],  # 8=PRODUCT_CREATE_CHANGES, 5=VENDOR_NEW_ORDER, 7=VENDOR_PARCEL_CHANGES
+    "basalam": [
+        8,
+        5,
+        7,
+    ],  # 8=PRODUCT_CREATE_CHANGES, 5=VENDOR_NEW_ORDER, 7=VENDOR_PARCEL_CHANGES
 }
 
 
 class WebhookRegistrationError(Exception):
     """Raised when webhook registration with platform fails"""
+
     pass
 
 
@@ -56,6 +61,34 @@ class IntegrationService:
         self._shop_repository = ShopRepository(session)
         self._integration_repository = ShopIntegrationRepository(session)
         self._platform_repository = PlatformRepository(session)
+
+    # ------------------------------------------------------------------
+    # Credential helpers
+    # ------------------------------------------------------------------
+
+    def _read_credentials(self, credentials: Any) -> Dict[str, Any]:
+        """Read credentials from storage.
+
+        Credentials are stored as plain JSON: ``{"access_token": ..., "refresh_token": ...}``.
+
+        Returns:
+            Dict with access_token, refresh_token, vendor_id, etc.
+
+        Raises:
+            ValueError: If credentials are in an unexpected format (e.g. legacy encrypted blob).
+        """
+        if not credentials:
+            return {}
+        if isinstance(credentials, dict):
+            return credentials
+        logger.warning(
+            "credentials_unexpected_format",
+            credentials_type=type(credentials).__name__,
+        )
+        raise ValueError(
+            f"Credentials in unexpected format: {type(credentials).__name__}. "
+            f"Expected dict, got {type(credentials).__name__}."
+        )
 
     async def _get_shop_or_fail(self, shop_id: uuid.UUID) -> Shop:
         """
@@ -113,17 +146,33 @@ class IntegrationService:
             Newly created ShopIntegration instance
 
         Raises:
-            ValueError: If shop or platform not found
+            ValueError: If shop or platform not found, or shop already has an integration
             WebhookRegistrationError: If webhook registration fails
         """
         shop = await self._get_shop_or_fail(shop_id)
         platform = await self._get_platform_or_fail(platform_code)
 
+        # Enforce one integration per shop
+        existing = await self._integration_repository.get_active_by_shop(shop.id)
+        if existing:
+            raise ValueError(
+                f"Shop '{shop.id}' already has an active integration. "
+                f"Disconnect it before connecting to a new platform."
+            )
+
+        # Clean up any stale pending integration from a previous abandoned flow
+        stale = await self._integration_repository.get_pending_by_shop(shop.id)
+        if stale:
+            await self._integration_repository.delete(stale.id)
+            logger.info(
+                "cleaned_up_stale_pending", shop_id=str(shop_id), stale_id=str(stale.id)
+            )
+
         integration_data = {
             "shop_id": shop.id,
             "platform_id": platform.id,
             "connection_type": credentials.get("connection_type", "api"),
-            "credentials_encrypted": credentials.get("credentials"),
+            "credentials": credentials.get("credentials"),
             "external_shop_id": credentials.get("external_shop_id"),
             "status": "pending",  # Start as pending, will be connected after webhook registration
             "webhook_status": "not_registered",
@@ -192,14 +241,15 @@ class IntegrationService:
             WebhookRegistrationError: If registration fails
         """
         from src.core.config import get_settings
-        from src.domains.shops.service.webhook_secret_service import get_webhook_secret_service
+        from src.domains.shops.service.webhook_secret_service import (
+            get_webhook_secret_service,
+        )
 
         settings = get_settings()
         secret_service = get_webhook_secret_service()
 
-        # Generate webhook secret
+        # Generate webhook secret (plaintext)
         secret = secret_service.generate_secret()
-        encrypted_secret = secret_service.encrypt_for_storage(secret)
 
         # Build webhook URL using configured base URL
         base_url = settings.webhook_base_url or settings.base_url
@@ -213,7 +263,7 @@ class IntegrationService:
                 integration=integration,
                 webhook_url=webhook_url,
                 events=events,
-                encrypted_secret=encrypted_secret,
+                webhook_secret=secret,
             )
 
         # Non-Basalam platforms (Shopify, WooCommerce) — delegate to connector
@@ -222,7 +272,7 @@ class IntegrationService:
 
         connector: ShopConnectorPort = get_connector(
             platform.code,
-            {"credentials": integration.credentials_encrypted},
+            {"credentials": integration.credentials},
             vendor_id=integration.external_shop_id,
         )
 
@@ -231,7 +281,7 @@ class IntegrationService:
 
             await self._integration_repository.update(
                 integration.id,
-                {"webhook_secret_encrypted": encrypted_secret},
+                {"webhook_secret": secret},
             )
 
             logger.info(
@@ -242,7 +292,9 @@ class IntegrationService:
             )
 
             return {
-                "webhook_id": str(integration.id),  # fallback ID when platform doesn't return one
+                "webhook_id": str(
+                    integration.id
+                ),  # fallback ID when platform doesn't return one
                 "webhook_url": webhook_url,
                 "events": events,
                 "success": success,
@@ -262,25 +314,16 @@ class IntegrationService:
         integration: ShopIntegration,
         webhook_url: str,
         events: list,
-        encrypted_secret: str,
+        webhook_secret: str,
     ) -> Dict[str, Any]:
         """2-step Basalam webhook registration: create webhook then subscribe vendor."""
         from src.core.config import get_settings
-        from src.domains.shops.service.webhook_secret_service import get_webhook_secret_service
         from src.integrations.basalam.client import BasalamClient
 
         settings = get_settings()
 
-        # Decrypt credentials to get vendor access token
-        secret_service = get_webhook_secret_service()
-        credentials_blob = integration.credentials_encrypted
-        if isinstance(credentials_blob, dict):
-            encrypted = credentials_blob.get("encrypted", "")
-        else:
-            encrypted = str(credentials_blob)
-
-        decrypted = secret_service.decrypt_from_storage(encrypted)
-        creds = json.loads(decrypted)
+        # Read credentials
+        creds = self._read_credentials(integration.credentials)
         access_token = creds.get("access_token", "")
         refresh_token = creds.get("refresh_token", "")
 
@@ -305,11 +348,11 @@ class IntegrationService:
                 access_token=access_token,
             )
 
-            # Store encrypted webhook secret and webhook_id
+            # Store webhook secret and webhook_id
             await self._integration_repository.update(
                 integration.id,
                 {
-                    "webhook_secret_encrypted": encrypted_secret,
+                    "webhook_secret": webhook_secret,
                     "webhook_id": webhook_id,
                 },
             )
@@ -424,7 +467,7 @@ class IntegrationService:
         # Get platform connector
         connector = get_connector(
             platform.code,
-            {"credentials": integration.credentials_encrypted},
+            {"credentials": integration.credentials},
             vendor_id=integration.external_shop_id,
         )
 
@@ -502,9 +545,7 @@ class IntegrationService:
         # Redis distributed lock to prevent concurrent refresh race
         lock_key = f"oauth:refresh:{integration.id}"
         redis_client = get_redis_client()
-        lock_acquired = await redis_client.set(
-            lock_key, "1", nx=True, ex=30
-        )
+        lock_acquired = await redis_client.set(lock_key, "1", nx=True, ex=30)
 
         if not lock_acquired:
             logger.info(
@@ -516,15 +557,8 @@ class IntegrationService:
             return await self._integration_repository.get_by_id(integration.id)
 
         try:
-            # Decrypt current credentials to get refresh_token
-            credentials = integration.credentials_encrypted or {}
-            if isinstance(credentials, dict) and "encrypted" in credentials:
-                from src.domains.shops.service.webhook_secret_service import get_webhook_secret_service
-                secret_service = get_webhook_secret_service()
-                decrypted = secret_service.decrypt_from_storage(credentials["encrypted"])
-                creds = json.loads(decrypted)
-            else:
-                creds = credentials
+            # Read credentials
+            creds = self._read_credentials(integration.credentials)
 
             refresh_token_val = creds.get("refresh_token", "")
             if not refresh_token_val:
@@ -550,30 +584,24 @@ class IntegrationService:
                 # If refresh fails with auth error, mark as disconnected
                 await self._integration_repository.update(
                     integration.id,
-                    {"status": "disconnected", "last_error": f"Token refresh failed: {e}"},
+                    {
+                        "status": "disconnected",
+                        "last_error": f"Token refresh failed: {e}",
+                    },
                 )
                 raise
 
-            # Re-encrypt and store new credentials
+            # Store new credentials as plaintext
             new_creds = {
                 "access_token": token_data.get("access_token", ""),
-                "refresh_token": token_data.get(
-                    "refresh_token", refresh_token_val
-                ),
+                "refresh_token": token_data.get("refresh_token", refresh_token_val),
                 "vendor_id": creds.get("vendor_id", ""),
             }
-            from src.domains.shops.service.webhook_secret_service import (
-                get_webhook_secret_service,
-            )
-            secret_service = get_webhook_secret_service()
-            encrypted = secret_service.encrypt_for_storage(
-                json.dumps(new_creds)
-            )
 
             integration = await self._integration_repository.update(
                 integration.id,
                 {
-                    "credentials_encrypted": {"encrypted": encrypted},
+                    "credentials": new_creds,
                     "status": "connected",
                     "last_error": None,
                 },
@@ -667,13 +695,29 @@ class IntegrationService:
         platform = await self._get_platform_or_fail(platform_code)
         settings = get_settings()
 
+        # Enforce one integration per shop
+        existing = await self._integration_repository.get_active_by_shop(shop.id)
+        if existing:
+            raise ValueError(
+                f"Shop '{shop.id}' already has an active integration. "
+                f"Disconnect it before starting a new OAuth flow."
+            )
+
+        # Clean up any stale pending integration from a previous abandoned OAuth flow
+        stale = await self._integration_repository.get_pending_by_shop(shop.id)
+        if stale:
+            await self._integration_repository.delete(stale.id)
+            logger.info(
+                "cleaned_up_stale_pending", shop_id=str(shop_id), stale_id=str(stale.id)
+            )
+
         # Generate random state for CSRF protection
         state = uuid.uuid4().hex
 
         # Build authorization URL from connector's OAuth config (single source of truth)
         connector = get_shop_connector(platform_code)
         oauth_cfg = connector.oauth_config
-        redirect_uri = f"{settings.base_url}/api/v1/shops/{shop_id}/oauth/callback"
+        redirect_uri = f"{settings.frontend_base_url}/auth/callback"
         scope = " ".join(oauth_cfg.scopes)
 
         authorize_url = (
@@ -690,10 +734,12 @@ class IntegrationService:
         await redis_client.setex(
             f"oauth:state:{state}",
             600,
-            json.dumps({
-                "shop_id": str(shop_id),
-                "platform_code": platform_code,
-            }),
+            json.dumps(
+                {
+                    "shop_id": str(shop_id),
+                    "platform_code": platform_code,
+                }
+            ),
         )
 
         # Create pending integration
@@ -742,9 +788,6 @@ class IntegrationService:
         from src.core.config import get_settings
         from src.core.redis_client import get_redis_client
         from src.integrations.basalam.client import BasalamClient
-        from src.domains.shops.service.webhook_secret_service import (
-            get_webhook_secret_service,
-        )
 
         settings = get_settings()
         redis_client = get_redis_client()
@@ -783,7 +826,7 @@ class IntegrationService:
             )
 
         # Exchange authorization code for tokens
-        redirect_uri = f"{settings.base_url}/api/v1/shops/{shop_id}/oauth/callback"
+        redirect_uri = f"{settings.frontend_base_url}/auth/callback"
         client = BasalamClient(
             client_id=settings.basalam_client_id,
             client_secret=settings.basalam_client_secret.get_secret_value(),
@@ -792,10 +835,12 @@ class IntegrationService:
         try:
             token_data = await client.exchange_authorization_code(code, redirect_uri)
         except Exception as e:
-            logger.error("token_exchange_failed", integration_id=str(integration.id), error=str(e))
-            raise ValueError(
-                f"Failed to exchange authorization code with Basalam: {e}"
+            logger.error(
+                "token_exchange_failed",
+                integration_id=str(integration.id),
+                error=str(e),
             )
+            raise ValueError(f"Failed to exchange authorization code with Basalam: {e}")
 
         access_token = token_data.get("access_token")
         refresh_token = token_data.get("refresh_token")
@@ -804,7 +849,11 @@ class IntegrationService:
         try:
             user_data = await client.get_current_user(access_token)
         except Exception as e:
-            logger.error("user_info_fetch_failed", integration_id=str(integration.id), error=str(e))
+            logger.error(
+                "user_info_fetch_failed",
+                integration_id=str(integration.id),
+                error=str(e),
+            )
             raise ValueError(f"Failed to fetch user info from Basalam: {e}")
 
         vendor_info = user_data.get("vendor")
@@ -824,20 +873,18 @@ class IntegrationService:
                 f"connected to another shop. Disconnect it first."
             )
 
-        # Encrypt credentials with Fernet
-        secret_service = get_webhook_secret_service()
-        credentials_blob = json.dumps({
+        # Store credentials as plaintext
+        credentials = {
             "access_token": access_token,
             "refresh_token": refresh_token,
             "vendor_id": vendor_id,
-        })
-        encrypted_credentials = secret_service.encrypt_for_storage(credentials_blob)
+        }
 
-        # Update integration with encrypted tokens and vendor info
+        # Update integration with tokens and vendor info
         integration = await self._integration_repository.update(
             integration.id,
             {
-                "credentials_encrypted": {"encrypted": encrypted_credentials},
+                "credentials": credentials,
                 "external_shop_id": vendor_id,
                 "status": "connected",
             },
@@ -846,29 +893,41 @@ class IntegrationService:
         # Register webhooks with the platform (non-blocking failure)
         try:
             webhook_result = await self._register_webhook_with_platform(
-                integration=integration, platform=platform,
+                integration=integration,
+                platform=platform,
             )
-            await self._integration_repository.update(integration.id, {
-                "webhook_id": webhook_result.get("webhook_id"),
-                "webhook_status": "active",
-                "webhook_registered_at": datetime.now(timezone.utc),
-            })
-            logger.info("webhooks_registered_after_oauth",
-                        integration_id=str(integration.id),
-                        webhook_id=webhook_result.get("webhook_id"))
+            await self._integration_repository.update(
+                integration.id,
+                {
+                    "webhook_id": webhook_result.get("webhook_id"),
+                    "webhook_status": "active",
+                    "webhook_registered_at": datetime.now(timezone.utc),
+                },
+            )
+            logger.info(
+                "webhooks_registered_after_oauth",
+                integration_id=str(integration.id),
+                webhook_id=webhook_result.get("webhook_id"),
+            )
         except Exception as e:
-            logger.warning("webhook_registration_failed_after_oauth",
-                           integration_id=str(integration.id), error=str(e))
-            await self._integration_repository.update(integration.id,
-                {"webhook_status": "not_registered"})
+            logger.warning(
+                "webhook_registration_failed_after_oauth",
+                integration_id=str(integration.id),
+                error=str(e),
+            )
+            await self._integration_repository.update(
+                integration.id, {"webhook_status": "not_registered"}
+            )
 
         # Update shop settings with vendor metadata
         shop_settings = shop.settings or {}
-        shop_settings.update({
-            "basalam_shop_name": vendor_info.get("title", ""),
-            "basalam_shop_identifier": vendor_info.get("identifier", ""),
-            "basalam_connected_at": datetime.now(timezone.utc).isoformat(),
-        })
+        shop_settings.update(
+            {
+                "basalam_shop_name": vendor_info.get("title", ""),
+                "basalam_shop_identifier": vendor_info.get("identifier", ""),
+                "basalam_connected_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         await self._shop_repository.update(shop.id, {"settings": shop_settings})
 
         logger.info(
@@ -876,6 +935,50 @@ class IntegrationService:
             vendor_id=vendor_id,
             integration_id=str(integration.id),
         )
+
+        # Trigger initial product sync via Kafka event
+        try:
+            from src.core.events import ProductSyncRequested
+            from src.core.events.publisher import EventPublisher
+
+            publisher = EventPublisher(
+                kafka_bootstrap_servers=settings.kafka_bootstrap_servers,
+            )
+            try:
+                await publisher.publish(
+                    topic="sync.requested",
+                    event=ProductSyncRequested(
+                        integration_id=integration.id,
+                        full_sync=True,
+                        triggered_by="oauth_callback",
+                    ),
+                    route_by_type=True,
+                )
+                logger.info(
+                    "initial_product_sync_requested",
+                    integration_id=str(integration.id),
+                )
+            finally:
+                await publisher.close()
+        except Exception as e:
+            logger.error(
+                "initial_sync_kafka_failed_dispatching_celery_fallback",
+                integration_id=str(integration.id),
+                error=str(e),
+            )
+            try:
+                from src.workers.tasks.product_tasks import publish_sync_event
+
+                publish_sync_event.delay(
+                    str(integration.id), triggered_by="oauth_callback"
+                )
+            except Exception as fallback_err:
+                logger.critical(
+                    "both_kafka_and_celery_sync_failed",
+                    integration_id=str(integration.id),
+                    kafka_error=str(e),
+                    celery_error=str(fallback_err),
+                )
 
         await client.close()
         return integration
@@ -899,7 +1002,9 @@ class IntegrationService:
         Raises:
             ValueError: If integration not found or not active
         """
-        from src.domains.shops.service.webhook_secret_service import get_webhook_secret_service
+        from src.domains.shops.service.webhook_secret_service import (
+            get_webhook_secret_service,
+        )
         from src.integrations.shop.registry import get_connector
         from src.core.config import get_settings
 
@@ -916,11 +1021,9 @@ class IntegrationService:
         settings = get_settings()
 
         # Generate new secret
-        (
-            new_secret_plaintext,
-            new_secret_encrypted,
-            old_secret_expires_at,
-        ) = secret_service.rotate_secret(integration.webhook_secret_encrypted)
+        new_secret, old_secret_expires_at = secret_service.rotate_secret(
+            integration.webhook_secret,
+        )
 
         # Get platform connector
         platform = await self._platform_repository.get_by_id(integration.platform_id)
@@ -929,7 +1032,7 @@ class IntegrationService:
 
         connector = get_connector(
             platform.code,
-            {"credentials": integration.credentials_encrypted},
+            {"credentials": integration.credentials},
             vendor_id=integration.external_shop_id,
         )
 
@@ -941,15 +1044,15 @@ class IntegrationService:
             # Update webhook on platform
             await connector.update_webhook(
                 integration.webhook_id,
-                {"secret": new_secret_plaintext, "url": webhook_url},
+                {"secret": new_secret, "url": webhook_url},
             )
 
-            # Store new encrypted secret
+            # Store new secret (plaintext)
             await self._integration_repository.update(
                 integration.id,
                 {
-                    "webhook_secret_encrypted": new_secret_encrypted,
-                    "webhook_previous_secret_encrypted": integration.webhook_secret_encrypted,
+                    "webhook_secret": new_secret,
+                    "webhook_previous_secret": integration.webhook_secret,
                     "webhook_secret_rotated_at": datetime.now(timezone.utc),
                     "webhook_previous_secret_expires_at": old_secret_expires_at,
                 },
@@ -963,7 +1066,7 @@ class IntegrationService:
 
             return {
                 "integration_id": str(integration.id),
-                "new_secret": new_secret_plaintext,  # Only returned once!
+                "new_secret": new_secret,  # Only returned once!
                 "previous_secret_expires_at": old_secret_expires_at.isoformat(),
                 "message": "Store the new_secret securely. Previous secret remains valid for 24 hours.",
             }
@@ -1000,7 +1103,9 @@ class IntegrationService:
 
         # Count recent webhooks
         from sqlalchemy import text
-        result = await self.session.execute(text("""
+
+        result = await self.session.execute(
+            text("""
             SELECT
                 COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') as last_24h,
                 COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days') as last_7d,
@@ -1010,7 +1115,9 @@ class IntegrationService:
                 MAX(created_at) as last_received_at
             FROM webhook_events
             WHERE integration_id = :integration_id
-        """), {"integration_id": str(integration_id)})
+        """),
+            {"integration_id": str(integration_id)},
+        )
         stats = result.fetchone()
 
         return {
@@ -1019,7 +1126,8 @@ class IntegrationService:
             "webhook_id": integration.webhook_id,
             "webhook_registered_at": (
                 integration.webhook_registered_at.isoformat()
-                if integration.webhook_registered_at else None
+                if integration.webhook_registered_at
+                else None
             ),
             "webhooks_received_24h": stats[0] or 0,
             "webhooks_received_7d": stats[1] or 0,

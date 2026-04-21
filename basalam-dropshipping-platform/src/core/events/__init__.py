@@ -19,6 +19,7 @@ from .product import (
     ProductStatusChanged,
     ProductForbid,
     ProductSynced,
+    ProductSyncRequested,
 )
 from .pricing import (
     PriceUpdated,
@@ -49,6 +50,7 @@ __all__ = [
     "ProductStatusChanged",
     "ProductForbid",
     "ProductSynced",
+    "ProductSyncRequested",
     "PriceUpdated",
     "MarginValidationFailed",
     "PaymentReceived",

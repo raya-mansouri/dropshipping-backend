@@ -6,15 +6,16 @@ Business logic for inventory reservations with deadlock detection and partial re
 
 import asyncio
 import structlog
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import update
 
-from ..models import InventoryReservation, InventoryLog, InventorySource
+from ..models import InventoryReservation, InventorySource
 from ..repository import (
     InventoryRepository,
     InventoryReservationRepository,

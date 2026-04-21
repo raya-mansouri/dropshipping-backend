@@ -90,7 +90,6 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Webhook Security
     # ------------------------------------------------------------------
-    webhook_secret_encryption_key: SecretStr = SecretStr("")  # Fernet key for webhook secret encryption
     webhook_base_url: str = ""  # Base URL for webhook endpoint (e.g., https://api.example.com)
     webhook_default_rate_limit: int = 100  # requests per minute
     webhook_default_timestamp_tolerance: int = 300  # seconds

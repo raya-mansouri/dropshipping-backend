@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from uuid import UUID, uuid4
 
 from .base import DomainEvent
@@ -99,3 +99,39 @@ class ProductSynced(DomainEvent):
         )
         self.product_id = product_id
         self.basalam_product_id = basalam_product_id
+
+
+class ProductSyncRequested(DomainEvent):
+    """Published to trigger a product sync for a specific integration."""
+
+    def __init__(
+        self,
+        integration_id: UUID,
+        full_sync: bool = False,
+        triggered_by: str = "manual",
+        job_id: Optional[UUID] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        if not integration_id:
+            raise ValueError("integration_id is required")
+        self.integration_id = integration_id
+        self.full_sync = full_sync
+        self.triggered_by = triggered_by
+        self.job_id = job_id
+
+        meta = dict(metadata) if metadata else {}
+        meta.update(
+            {
+                "integration_id": str(integration_id),
+                "full_sync": full_sync,
+                "triggered_by": triggered_by,
+            }
+        )
+        if job_id is not None:
+            meta["job_id"] = str(job_id)
+        super().__init__(
+            event_id=uuid4(),
+            event_type="ProductSyncRequested",
+            occurred_at=datetime.now(timezone.utc),
+            metadata=meta,
+        )
