@@ -25,7 +25,11 @@ logger = structlog.get_logger(__name__)
     reject_on_worker_lost=True,
 )
 def process_incoming_webhook(
-    self, event_type: str, webhook_id: str = None, payload: dict = None
+    self,
+    event_type: str,
+    webhook_id: str = None,
+    payload: dict = None,
+    platform_id: str = "basalam",
 ):
     """Process an incoming webhook event.
 
@@ -33,7 +37,7 @@ def process_incoming_webhook(
     Any exception propagates back via result.get() to the Kafka consumer.
     """
     try:
-        run_async(_process(event_type, webhook_id, payload or {}))
+        run_async(_process(event_type, webhook_id, payload or {}, platform_id))
     except Exception as exc:
         logger.error(
             "webhook_processing_failed",
@@ -44,42 +48,71 @@ def process_incoming_webhook(
         raise
 
 
-async def _process(event_type: str, webhook_id: str, payload: dict):
+async def _process(event_type: str, webhook_id: str, payload: dict, platform_id: str):
     from src.core.database import async_session_maker
     from src.core.repository.unit_of_work import UnitOfWork
 
     async with async_session_maker() as session:
         async with UnitOfWork(session):
-            # Idempotency check
+            # Idempotency check — uses its own isolated DB session so the
+            # idempotency record survives a business-logic rollback.
             idempotency = None
             if webhook_id:
                 from src.integrations.webhooks.idempotency import IdempotencyManager
 
                 idempotency = IdempotencyManager(db_session=session)
-                if await idempotency.is_processed(webhook_id):
-                    logger.info("Duplicate webhook skipped", webhook_id=webhook_id)
-                    return
+                try:
+                    if await idempotency.is_processed(webhook_id):
+                        logger.info("Duplicate webhook skipped", webhook_id=webhook_id)
+                        return
+                finally:
+                    await idempotency.close()
 
             # Get processor and process
             from src.integrations.webhooks.processors.base import (
                 WebhookProcessorRegistry,
             )
+            from src.integrations.webhooks.processors.product import (
+                ProductWebhookProcessor,
+            )
+            from src.integrations.webhooks.processors.order import (
+                OrderWebhookProcessor,
+            )
+            from src.integrations.webhooks.processors.inventory import (
+                InventoryWebhookProcessor,
+            )
 
+            # Build registry with processors wired to this session.
+            # Signature verification was already performed by the API layer
+            # before dispatching this task, so secret is not needed here.
             registry = WebhookProcessorRegistry()
-            processor = registry.get_processor(event_type)
+            product_proc = ProductWebhookProcessor(secret="", db_session=session)
+            order_proc = OrderWebhookProcessor(secret="", db_session=session)
+            inventory_proc = InventoryWebhookProcessor(secret="", db_session=session)
+            registry.register("basalam", "product.changes", product_proc)
+            registry.register("basalam", "order.created", order_proc)
+            registry.register("basalam", "order.parcel_changed", order_proc)
+            registry.register("basalam", "inventory.changed", inventory_proc)
+
+            processor = registry.get(platform_id, event_type=event_type)
 
             if not processor:
                 raise ValueError(
-                    f"No processor registered for event_type '{event_type}'"
+                    f"No processor registered for platform '{platform_id}' "
+                    f"and event_type '{event_type}'"
                 )
 
             await processor.process(payload, {})
 
             # Record as processed after successful handling
-            if webhook_id and idempotency:
-                await idempotency.mark_processed(
-                    webhook_id, result={"event_type": event_type}
-                )
+            if webhook_id:
+                idempotency = IdempotencyManager(db_session=session)
+                try:
+                    await idempotency.mark_processed(
+                        webhook_id, result={"event_type": event_type}
+                    )
+                finally:
+                    await idempotency.close()
 
             logger.info(
                 "Webhook processed via Celery",

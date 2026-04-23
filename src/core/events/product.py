@@ -106,14 +106,21 @@ class ProductSyncRequested(DomainEvent):
 
     def __init__(
         self,
-        integration_id: UUID,
+        integration_id: "str | UUID",
         full_sync: bool = False,
         triggered_by: str = "manual",
-        job_id: Optional[UUID] = None,
+        job_id: "Optional[str | UUID]" = None,
         metadata: Optional[Dict[str, Any]] = None,
     ):
         if not integration_id:
             raise ValueError("integration_id is required")
+
+        # Auto-coerce str to UUID so both publishers and consumers work
+        if isinstance(integration_id, str):
+            integration_id = UUID(integration_id)
+        if job_id is not None and isinstance(job_id, str):
+            job_id = UUID(job_id)
+
         self.integration_id = integration_id
         self.full_sync = full_sync
         self.triggered_by = triggered_by

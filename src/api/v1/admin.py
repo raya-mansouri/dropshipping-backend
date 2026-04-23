@@ -7,13 +7,13 @@ shops, users, sync status, and webhooks.
 All admin actions are recorded via AuditLogService for compliance.
 """
 import structlog
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -21,7 +21,7 @@ from src.api.deps import get_db, require_admin, get_audit_service
 from src.domains.orders.models import Order, OrderStatus, OrderItem
 from src.domains.products.models import SupplierVariant
 from src.domains.inventory.models import InventoryReservation
-from src.domains.payments.models import Dispute
+from src.domains.payments.models import Dispute, Payment, SupplierPayout
 from src.domains.fraud_detection.models import FraudSignal
 from src.domains.shops.models import Shop, ShopIntegration, SyncState
 from src.domains.accounts.models import User
@@ -635,4 +635,165 @@ async def update_user(
         "phone": user.phone,
         "role": user.role,
         "is_active": user.is_active,
+    }
+
+
+# --- System-wide read endpoints ---
+
+
+@router.get("/orders")
+async def list_all_orders(
+    status: Optional[str] = None,
+    shop_id: Optional[UUID] = None,
+    limit: int = 50,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """List all orders across all shops. Admin only."""
+    stmt = select(Order).order_by(Order.created_at.desc()).offset(offset).limit(limit)
+    if status:
+        stmt = stmt.where(Order.status == status)
+    if shop_id:
+        stmt = stmt.where(Order.shop_id == shop_id)
+
+    result = await session.execute(stmt)
+    orders = result.scalars().all()
+
+    return {
+        "orders": [
+            {
+                "id": str(o.id),
+                "shop_id": str(o.shop_id),
+                "status": o.status,
+                "total_price": float(o.total_price) if o.total_price else 0,
+                "shipping_price": float(o.shipping_price) if o.shipping_price else 0,
+                "discount": float(o.discount) if o.discount else 0,
+                "created_at": o.created_at.isoformat() if o.created_at else None,
+            }
+            for o in orders
+        ],
+        "total": len(orders),
+    }
+
+
+@router.get("/dashboard")
+async def admin_dashboard(
+    session: AsyncSession = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """Aggregated system-wide stats for the admin dashboard."""
+    # Total orders
+    total_orders_result = await session.execute(
+        select(func.count(Order.id))
+    )
+    total_orders = total_orders_result.scalar() or 0
+
+    # Total revenue (sum of total_price across all orders)
+    total_revenue_result = await session.execute(
+        select(func.coalesce(func.sum(Order.total_price), 0))
+    )
+    total_revenue = float(total_revenue_result.scalar() or 0)
+
+    # Active shops
+    active_shops_result = await session.execute(
+        select(func.count(Shop.id)).where(Shop.status == "active")
+    )
+    active_shops = active_shops_result.scalar() or 0
+
+    # Total users
+    total_users_result = await session.execute(
+        select(func.count(User.id))
+    )
+    total_users = total_users_result.scalar() or 0
+
+    # Recent orders count (last 24 hours)
+    yesterday = datetime.now(timezone.utc) - timedelta(hours=24)
+    recent_orders_result = await session.execute(
+        select(func.count(Order.id)).where(Order.created_at >= yesterday)
+    )
+    recent_orders_count = recent_orders_result.scalar() or 0
+
+    # Pending payouts amount (sum of amount for payouts in 'pending' status)
+    pending_payouts_result = await session.execute(
+        select(func.coalesce(func.sum(SupplierPayout.amount), 0)).where(
+            SupplierPayout.status == "pending"
+        )
+    )
+    pending_payouts_amount = float(pending_payouts_result.scalar() or 0)
+
+    return {
+        "total_orders": total_orders,
+        "total_revenue": total_revenue,
+        "active_shops": active_shops,
+        "total_users": total_users,
+        "recent_orders_count": recent_orders_count,
+        "pending_payouts_amount": pending_payouts_amount,
+    }
+
+
+@router.get("/payments")
+async def list_all_payments(
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """List all payments across all shops. Admin only."""
+    stmt = select(Payment).order_by(Payment.created_at.desc()).offset(offset).limit(limit)
+    if status:
+        stmt = stmt.where(Payment.status == status)
+
+    result = await session.execute(stmt)
+    payments = result.scalars().all()
+
+    return {
+        "payments": [
+            {
+                "id": str(p.id),
+                "order_id": str(p.order_id),
+                "status": p.status,
+                "seller_paid_amount": float(p.seller_paid_amount) if p.seller_paid_amount else 0,
+                "supplier_payable_amount": float(p.supplier_payable_amount) if p.supplier_payable_amount else 0,
+                "platform_fee": float(p.platform_fee) if p.platform_fee else 0,
+                "gateway": p.gateway,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+            }
+            for p in payments
+        ],
+        "total": len(payments),
+    }
+
+
+@router.get("/disputes")
+async def list_all_disputes(
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_db),
+    current_user=Depends(require_admin),
+):
+    """List all disputes across all orders. Admin only."""
+    stmt = select(Dispute).order_by(Dispute.created_at.desc()).offset(offset).limit(limit)
+    if status:
+        stmt = stmt.where(Dispute.status == status)
+
+    result = await session.execute(stmt)
+    disputes = result.scalars().all()
+
+    return {
+        "disputes": [
+            {
+                "id": str(d.id),
+                "order_item_id": str(d.order_item_id),
+                "opened_by": d.opened_by,
+                "status": d.status,
+                "reason": d.reason,
+                "outcome": d.outcome,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+            }
+            for d in disputes
+        ],
+        "total": len(disputes),
     }

@@ -1,8 +1,34 @@
 import asyncio
 
 from celery import Celery
+from celery.signals import worker_process_init
 
 from src.core.config import get_settings
+
+
+@worker_process_init.connect
+def reset_db_pool(**kwargs):
+    """Reset database connection pool after Celery worker fork.
+
+    When Celery forks worker processes (prefork pool), child processes
+    inherit the parent's SQLAlchemy engine connection pool. Those inherited
+    connections are stale and can cause errors. Disposing the pool forces
+    new connections to be created on first use in the child process.
+    """
+    import asyncio
+    from src.core.database import engine
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(lambda: asyncio.run(engine.dispose())).result()
+    else:
+        asyncio.run(engine.dispose())
 
 
 def run_async(coro):

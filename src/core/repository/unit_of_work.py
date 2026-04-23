@@ -133,6 +133,26 @@ class UnitOfWork:
         """Flush pending changes to the database."""
         await self.session.flush()
 
+    @asynccontextmanager
+    async def savepoint(self):
+        """Create a SAVEPOINT for partial rollback within the current transaction.
+
+        Allows rolling back to a named checkpoint without aborting the entire
+        transaction.  Useful when a subset of operations (e.g. idempotency
+        record writes) must be committed independently of the main business
+        logic.
+
+        Usage::
+
+            async with UnitOfWork(session) as uow:
+                # operations here belong to the outer transaction
+                async with uow.savepoint():
+                    # operations here can be rolled back independently
+                    ...
+        """
+        async with self.session.begin_nested():
+            yield
+
     async def refresh(self, instance):
         """Refresh an instance from the database."""
         await self.session.refresh(instance)

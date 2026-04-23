@@ -20,8 +20,9 @@ from pydantic import ValidationError
 from prometheus_client import generate_latest
 
 from src.api.deps import require_admin
-from src.api.v1 import auth, orders, products, shops, health
-from src.api.v1 import webhooks, webhook_health, admin
+from src.api.v1 import auth, orders, products, shops, health, notifications
+from src.api.v1 import webhooks, webhook_health, admin, payment
+from src.api.v1 import inventory, payments, shipping
 from src.core.config import get_settings
 from src.core.events.publisher import EventPublisher
 from src.core.logging import configure_logging
@@ -48,6 +49,15 @@ async def lifespan(app: FastAPI):
         logger.info("migrations_applied")
     except Exception as exc:
         logger.warning("migration_failed", error=str(exc))
+
+    # Initialize Kafka topics (DLQ, retry, etc.)
+    try:
+        from src.workers.consumers.init_topics import create_topics
+
+        await asyncio.wait_for(create_topics(), timeout=30)
+        logger.info("kafka_topics_created")
+    except Exception as exc:
+        logger.warning("kafka_topic_creation_failed", error=str(exc))
 
     # Initialize EventPublisher
     event_publisher = None
@@ -82,13 +92,18 @@ app = FastAPI(
 
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(CorrelationIdMiddleware)
+
+# Resolve CORS origins — production requires an explicit list; dev uses safe defaults.
+if settings.app_env == "production":
+    _cors_origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+    if not _cors_origins:
+        logger.warning("cors_origins_empty_in_production")
+else:
+    _cors_origins = ["http://localhost:3000", "http://localhost:8080"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=(
-        [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
-        if settings.app_env == "production"
-        else ["http://localhost:3000", "http://localhost:8080"]
-    ),
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "X-Correlation-ID"],
@@ -125,7 +140,12 @@ app.include_router(shops.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")
 app.include_router(webhook_health.router, prefix="/api/v1")
+app.include_router(notifications.router, prefix="/api/v1")
+app.include_router(inventory.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
+app.include_router(payment.router, prefix="/api/v1")
+app.include_router(payments.router, prefix="/api/v1")
+app.include_router(shipping.router, prefix="/api/v1")
 
 
 # ============================================

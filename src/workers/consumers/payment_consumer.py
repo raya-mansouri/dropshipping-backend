@@ -23,6 +23,7 @@ from src.integrations.notification.ports import (
     NotificationContent,
 )
 from src.domains.payments.service import PaymentService
+from src.core.events.publisher import EventPublisher
 from src.domains.orders.models import Order
 from src.domains.shops.models import Shop
 from src.domains.shipping import ShippingService
@@ -56,7 +57,16 @@ class PaymentUpdatedConsumer(DLQAwareConsumer):
         )
 
         async with async_session_maker() as session:
-            payment_service = PaymentService(session)
+            event_publisher = None
+            try:
+                event_publisher = EventPublisher(
+                    kafka_bootstrap_servers=self.bootstrap_servers,
+                    db_session=session,
+                )
+            except Exception:
+                logger.exception("failed_to_initialize_event_publisher")
+
+            payment_service = PaymentService(session, event_publisher=event_publisher)
 
             try:
                 if event_type == "payment.captured":

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Tuple
 from uuid import UUID
 
-from sqlalchemy import select, and_, update
+from sqlalchemy import select, and_, update, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -558,7 +558,7 @@ class ProductSyncService:
                 "raw_payload": stmt.excluded.raw_payload,
                 "moderation_status": stmt.excluded.moderation_status,
                 "last_synced_at": stmt.excluded.last_synced_at,
-                "updated_at": datetime.now(timezone.utc),
+                "updated_at": func.now(),
             },
         )
 
@@ -606,18 +606,26 @@ class ProductSyncService:
                 variant["external_product_id"]
             )
             if product_internal_id:
-                variant_records.append(
-                    {
-                        "supplier_product_id": product_internal_id,
-                        "external_variant_id": variant["external_variant_id"],
-                        "sku": variant.get("sku"),
-                        "attributes": variant.get("attributes", {}),
-                        "cost_price": variant.get("cost_price", 0),
-                        "inventory": variant.get("inventory", 0),
-                        "status": variant.get("status", "active"),
-                        "raw_payload": variant.get("raw_payload"),
-                    }
+                # Look up or create ProductVariant to get internal variant_id
+                pv_result = await self.session.execute(
+                    select(ProductVariant.id).where(
+                        ProductVariant.external_variant_id
+                        == variant["external_variant_id"]
+                    )
                 )
+                pv_id = pv_result.scalar_one_or_none()
+                if pv_id:
+                    variant_records.append(
+                        {
+                            "supplier_product_id": product_internal_id,
+                            "variant_id": str(pv_id),
+                            "sku": variant.get("sku"),
+                            "cost_price": variant.get("cost_price", 0),
+                            "inventory": variant.get("inventory", 0),
+                            "status": variant.get("status", "active"),
+                            "raw_payload": variant.get("raw_payload"),
+                        }
+                    )
 
         if not variant_records:
             return (0, 0)
@@ -625,15 +633,14 @@ class ProductSyncService:
         stmt = pg_insert(SupplierVariant).values(variant_records)
 
         stmt = stmt.on_conflict_do_update(
-            index_elements=["supplier_product_id", "external_variant_id"],
+            index_elements=["supplier_product_id", "variant_id"],
             set_={
                 "sku": stmt.excluded.sku,
-                "attributes": stmt.excluded.attributes,
                 "cost_price": stmt.excluded.cost_price,
                 "inventory": stmt.excluded.inventory,
                 "status": stmt.excluded.status,
                 "raw_payload": stmt.excluded.raw_payload,
-                "updated_at": datetime.now(timezone.utc),
+                "updated_at": func.now(),
             },
         )
 

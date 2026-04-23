@@ -25,29 +25,45 @@ async def get_session() -> AsyncSession:
         yield session
 
 
-async def notify_sellers(reservations: List[InventoryReservation]) -> None:
+async def notify_sellers(
+    session: AsyncSession, reservations: List[InventoryReservation]
+) -> None:
     from src.integrations.notification.manager import NotificationManager
+    from src.domains.shops.models import Shop
 
-    seller_ids = set()
+    shop_ids = set()
     for reservation in reservations:
         if reservation.order_item and reservation.order_item.order:
-            seller_ids.add(reservation.order_item.order.seller_id)
+            shop_ids.add(reservation.order_item.order.shop_id)
 
-    if not seller_ids:
+    if not shop_ids:
         return
 
+    # Look up shop owners (account_id) for all affected shops
+    result = await session.execute(
+        select(Shop.id, Shop.account_id).where(Shop.id.in_(shop_ids))
+    )
+    shop_to_account = {row.id: row.account_id for row in result.all()}
+
     notification_manager = NotificationManager()
-    for seller_id in seller_ids:
+    for shop_id in shop_ids:
+        account_id = shop_to_account.get(shop_id)
+        if not account_id:
+            logger.warning("shop_has_no_account", shop_id=str(shop_id))
+            continue
         try:
-            await notification_manager.send_notification(
-                recipient_id=seller_id,
-                notification_type="inventory_expired",
+            await notification_manager.notify_user(
+                user_id=account_id,
                 title="Inventory Reservation Expired",
                 body=f"{len(reservations)} reservation(s) have expired due to payment timeout.",
-                metadata={"reservation_count": len(reservations)},
             )
         except Exception as e:
-            logger.error("failed_to_notify_seller", seller_id=str(seller_id), error=str(e))
+            logger.error(
+                "failed_to_notify_seller",
+                shop_id=str(shop_id),
+                account_id=str(account_id),
+                error=str(e),
+            )
 
 
 @shared_task(bind=True, max_retries=3)
@@ -75,7 +91,11 @@ def cleanup_expired_reservations(self):
                     )
                     released += 1
                 except Exception as e:
-                    logger.error("failed_to_release_reservation", reservation_id=str(reservation.id), error=str(e))
+                    logger.error(
+                        "failed_to_release_reservation",
+                        reservation_id=str(reservation.id),
+                        error=str(e),
+                    )
                 finally:
                     processed += 1
 
@@ -83,7 +103,7 @@ def cleanup_expired_reservations(self):
 
             if released > 0:
                 try:
-                    await notify_sellers(expired_reservations)
+                    await notify_sellers(session, expired_reservations)
                 except Exception as e:
                     logger.error("failed_to_notify_sellers", error=str(e))
 
@@ -143,7 +163,11 @@ def reconcile_inventory(self, integration_id: str = None):
                         }
                     )
                 except Exception as e:
-                    logger.error("reconciliation_failed", integration_id=str(int_id), error=str(e))
+                    logger.error(
+                        "reconciliation_failed",
+                        integration_id=str(int_id),
+                        error=str(e),
+                    )
                     results.append(
                         {
                             "integration_id": str(int_id),
@@ -153,6 +177,9 @@ def reconcile_inventory(self, integration_id: str = None):
                     )
 
             return results
+
+    result = run_async(_reconcile())
+    return result
 
 
 @shared_task(bind=True, max_retries=3)
@@ -179,7 +206,9 @@ def sync_inventory(self, integration_id: str = None):
                     integration = await integration_repo.get_by_id(int_id)
 
                     if not integration:
-                        logger.error("integration_not_found", integration_id=str(int_id))
+                        logger.error(
+                            "integration_not_found", integration_id=str(int_id)
+                        )
                         continue
 
                     sync_service = InventorySyncService(session)
@@ -210,7 +239,9 @@ def sync_inventory(self, integration_id: str = None):
                         }
                     )
                 except Exception as e:
-                    logger.error("sync_failed", integration_id=str(int_id), error=str(e))
+                    logger.error(
+                        "sync_failed", integration_id=str(int_id), error=str(e)
+                    )
                     results.append(
                         {
                             "integration_id": str(int_id),

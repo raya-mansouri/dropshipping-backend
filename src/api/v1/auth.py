@@ -4,20 +4,23 @@ Auth API Endpoints
 FastAPI endpoints for authentication and user management
 """
 
-from uuid import UUID
+import random
+from uuid import UUID, uuid4
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 from jose import jwt
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import redis.asyncio as redis
 
 import structlog
 import bcrypt as _bcrypt
+import httpx
 
-from src.api.deps import get_db, get_current_user, decode_token
+from src.api.deps import get_db, get_current_user, decode_token, get_redis
 from src.core.config import get_settings
 from src.domains.accounts.models import User, Account
 from src.domains.accounts.schemas import (
@@ -70,11 +73,35 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 
+async def blacklist_token(
+    redis_client: redis.Redis, token_jti: str, exp: datetime
+) -> None:
+    """
+    Add a token's JTI to the Redis blacklist with a TTL equal to remaining lifetime.
+
+    The key expires automatically from Redis once the token's original expiry passes,
+    so the blacklist does not grow unbounded.
+    """
+    now = datetime.now(timezone.utc)
+    remaining_seconds = int((exp - now).total_seconds())
+    if remaining_seconds > 0:
+        await redis_client.set(
+            f"blacklist:token:{token_jti}",
+            "1",
+            ex=remaining_seconds,
+        )
+
+
 def create_access_token(user_id: UUID) -> str:
     """Create JWT access token"""
 
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"sub": str(user_id), "type": "access", "exp": expire}
+    payload = {
+        "sub": str(user_id),
+        "type": "access",
+        "exp": expire,
+        "jti": str(uuid4()),
+    }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
@@ -82,7 +109,12 @@ def create_refresh_token(user_id: UUID) -> str:
     """Create JWT refresh token"""
 
     expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-    payload = {"sub": str(user_id), "type": "refresh", "exp": expire}
+    payload = {
+        "sub": str(user_id),
+        "type": "refresh",
+        "exp": expire,
+        "jti": str(uuid4()),
+    }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
@@ -115,7 +147,8 @@ async def register_with_account(
 
     if existing_user:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Phone number already registered"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Phone number already registered",
         )
 
     user = User(
@@ -187,7 +220,9 @@ async def login(login_data: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
-    refresh_data: RefreshTokenRequest, db: AsyncSession = Depends(get_db)
+    refresh_data: RefreshTokenRequest,
+    db: AsyncSession = Depends(get_db),
+    redis_client: redis.Redis = Depends(get_redis),
 ):
     """
     Refresh access token using refresh token
@@ -199,6 +234,15 @@ async def refresh_token(
     if payload.get("type") != "refresh":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type"
+        )
+
+    # Check if the refresh token has been blacklisted
+    refresh_jti = payload.get("jti")
+    if refresh_jti and await redis_client.get(f"blacklist:token:{refresh_jti}"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     user_id = payload.get("sub")
@@ -216,6 +260,11 @@ async def refresh_token(
             detail="User not found or inactive",
         )
 
+    # Blacklist the old refresh token so it cannot be reused
+    old_exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+    if refresh_jti:
+        await blacklist_token(redis_client, refresh_jti, old_exp)
+
     access_token = create_access_token(user.id)
     refresh_token = create_refresh_token(user.id)
 
@@ -226,10 +275,55 @@ async def refresh_token(
 
 
 @router.post("/logout")
-async def logout(current_user: User = Depends(get_current_user)):
+async def logout(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    redis_client: redis.Redis = Depends(get_redis),
+):
     """
-    Logout (invalidate tokens client-side)
+    Logout (server-side token invalidation)
+
+    Blacklists the current access token and optionally the refresh token
+    from the request body. Blacklisted tokens are stored in Redis with a
+    TTL equal to the token's remaining lifetime, so keys are cleaned up
+    automatically once the token expires.
     """
+    # --- Blacklist the access token from the Authorization header ---
+    auth_header = request.headers.get("Authorization", "")
+    access_token_str = auth_header.removeprefix("Bearer ").strip()
+    access_payload = decode_token(access_token_str)
+
+    access_jti = access_payload.get("jti")
+    if access_jti:
+        access_exp = datetime.fromtimestamp(access_payload["exp"], tz=timezone.utc)
+        await blacklist_token(redis_client, access_jti, access_exp)
+
+    # --- Optionally blacklist a refresh token sent in the body ---
+    try:
+        body = await request.json()
+        refresh_token_str = body.get("refresh_token")
+    except Exception:
+        refresh_token_str = None
+
+    if refresh_token_str:
+        try:
+            refresh_payload = decode_token(refresh_token_str)
+            refresh_jti = refresh_payload.get("jti")
+            if refresh_jti:
+                refresh_exp = datetime.fromtimestamp(
+                    refresh_payload["exp"], tz=timezone.utc
+                )
+                await blacklist_token(redis_client, refresh_jti, refresh_exp)
+        except HTTPException:
+            # If the refresh token is already expired or invalid, skip silently
+            pass
+
+    logger.info(
+        "user_logout",
+        user_id=str(current_user.id),
+        access_jti=access_jti,
+    )
+
     return {"message": "Successfully logged out"}
 
 
@@ -298,46 +392,68 @@ async def change_password(
 
 @router.post("/forgot-password")
 async def forgot_password(
-    reset_data: PasswordResetRequest, db: AsyncSession = Depends(get_db)
+    reset_data: PasswordResetRequest,
+    db: AsyncSession = Depends(get_db),
+    redis_client: redis.Redis = Depends(get_redis),
 ):
     """
-    Request password reset using phone number
+    Request password reset using phone number.
 
-    Generates a short-lived reset token. In production, send via SMS.
+    Generates a 6-digit OTP, stores it in Redis with 10 min TTL,
+    and sends it via Kavenegar SMS.
     """
     is_valid, error = validate_iranian_phone(reset_data.phone)
     if not is_valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error)
+
+    # Rate limit: max 3 OTP requests per phone per 10 minutes
+    rate_key = f"otp_request:{reset_data.phone}"
+    count = await redis_client.incr(rate_key)
+    if count == 1:
+        await redis_client.expire(rate_key, 600)
+    if count > 3:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many attempts. Try again later.",
         )
-    
+
     result = await db.execute(select(User).where(User.phone == reset_data.phone))
     user = result.scalar_one_or_none()
 
     if user:
+        otp = f"{random.randint(100000, 999999)}"
+        redis_key = f"password_reset:{reset_data.phone}"
+        await redis_client.set(redis_key, otp, ex=600)
 
-        # Create a short-lived reset token (10 minutes)
-        reset_expire = datetime.now(timezone.utc) + timedelta(minutes=10)
-        reset_payload = {
-            "sub": str(user.id),
-            "phone": user.phone,
-            "type": "password_reset",
-            "exp": reset_expire,
-        }
-        _reset_token = jwt.encode(  # noqa: F841 — TODO: send via SMS
-            reset_payload, SECRET_KEY, algorithm=ALGORITHM
-        )
-        # In production: send SMS with reset code to phone number
-        # TODO: Store reset_token in Redis with TTL and send via SMS
-        logger.info("password_reset_requested", user_id=str(user.id))
+        settings = get_settings()
+        if settings.kavenegar_api_key:
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"https://api.kavenegar.com/v1/{settings.kavenegar_api_key}/sms/send.json",
+                        data={
+                            "receptor": reset_data.phone,
+                            "sender": settings.kavenegar_sender,
+                            "message": f"کد بازیابی رمز عبور: {otp}\nاعتبار: ۱۰ دقیقه",
+                        },
+                        timeout=10,
+                    )
+                logger.info("password_reset_otp_sent", user_id=str(user.id))
+            except Exception as exc:
+                logger.error("password_reset_sms_failed", error=str(exc))
+        else:
+            logger.warning(
+                "password_reset_otp_skipped_no_kavenegar",
+                user_id=str(user.id),
+                otp=otp,
+            )
 
-    # Always return success message for security (don't reveal if phone exists)
     return {"message": "If the phone number exists, a reset code has been sent"}
 
 
 class PasswordResetConfirmRequest(BaseModel):
-    reset_token: str
+    phone: str
+    otp: str
     new_password: str = Field(..., min_length=8)
 
 
@@ -345,33 +461,47 @@ class PasswordResetConfirmRequest(BaseModel):
 async def reset_password(
     reset_data: PasswordResetConfirmRequest,
     db: AsyncSession = Depends(get_db),
+    redis_client: redis.Redis = Depends(get_redis),
 ):
     """
-    Reset password using token
+    Reset password using OTP sent via SMS.
 
-    Validates the reset token from forgot-password flow and updates the password.
+    Validates the OTP from Redis and updates the password.
     """
-    # Decode the reset token to get the phone number
-    payload = decode_token(reset_data.reset_token)
-    phone = payload.get("phone")
-    token_type = payload.get("type")
-
-    if not phone or token_type != "password_reset":
+    # Rate limit: max 5 verification attempts per phone per 10 minutes
+    rate_key = f"otp_verify:{reset_data.phone}"
+    count = await redis_client.incr(rate_key)
+    if count == 1:
+        await redis_client.expire(rate_key, 600)
+    if count > 5:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token",
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many attempts. Try again later.",
         )
 
-    result = await db.execute(select(User).where(User.phone == phone))
+    redis_key = f"password_reset:{reset_data.phone}"
+    stored_otp = await redis_client.get(redis_key)
+
+    if not stored_otp or stored_otp != reset_data.otp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code",
+        )
+
+    result = await db.execute(select(User).where(User.phone == reset_data.phone))
     user = result.scalar_one_or_none()
 
     if not user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset token",
+            detail="Invalid or expired reset code",
         )
 
     user.password_hash = hash_password(reset_data.new_password)
+    await redis_client.delete(redis_key)
+    # Clear rate-limit counters after successful reset
+    await redis_client.delete(f"otp_request:{reset_data.phone}")
+    await redis_client.delete(f"otp_verify:{reset_data.phone}")
     await db.flush()
 
     return {"message": "Password reset successfully"}

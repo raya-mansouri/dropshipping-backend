@@ -52,7 +52,7 @@ class KavenegarSMSAdapter(NotificationPort):
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    f"{self.api_key}/sms/send.json",
+                    f"{self.base_url}/{self.api_key}/sms/send.json",
                     data={
                         "receptor": request.recipient.phone,
                         "sender": self.sender,
@@ -139,7 +139,7 @@ class KavenegarSMSAdapter(NotificationPort):
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    f"{self.api_key}/sms/sendbulk.json",
+                    f"{self.base_url}/{self.api_key}/sms/sendbulk.json",
                     data={
                         "receptor": ",".join(phones),
                         "sender": self.sender,
@@ -180,7 +180,7 @@ class KavenegarSMSAdapter(NotificationPort):
         """Verify Kavenegar API connection"""
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(f"{self.api_key}/account/info.json")
+                response = await client.get(f"{self.base_url}/{self.api_key}/account/info.json")
                 return response.status_code == 200
         except Exception:
             return False

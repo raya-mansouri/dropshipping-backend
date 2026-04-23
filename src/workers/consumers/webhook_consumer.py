@@ -46,19 +46,31 @@ class WebhookConsumer(DLQAwareConsumer):
         )
 
         async with async_session_maker() as session:
-            async with UnitOfWork(session):
-                # Idempotency check
-                if webhook_id:
-                    from src.integrations.webhooks.idempotency import (
-                        IdempotencyManager,
-                    )
+            # Idempotency: check-then-mark *before* business logic so the
+            # record survives a rollback.  The IdempotencyManager uses its
+            # own isolated DB session, committing independently of the UoW.
+            if webhook_id:
+                from src.integrations.webhooks.idempotency import (
+                    IdempotencyManager,
+                )
 
-                    idempotency = IdempotencyManager(db_session=session)
+                idempotency = IdempotencyManager(db_session=session)
+                try:
                     if await idempotency.is_processed(webhook_id):
                         logger.info("Duplicate webhook skipped", webhook_id=webhook_id)
                         return
+                    # Mark processed immediately so the record is committed
+                    # to the isolated session *before* any business logic runs.
+                    # If business logic fails the idempotency record persists
+                    # and prevents infinite retries.
+                    await idempotency.mark_processed(
+                        webhook_id, result={"event_type": event_type}
+                    )
+                finally:
+                    await idempotency.close()
 
-                # Get processor and process
+            # Business logic runs inside its own UoW transaction.
+            async with UnitOfWork(session):
                 from src.integrations.webhooks.processors.base import (
                     WebhookProcessorRegistry,
                 )
@@ -71,13 +83,7 @@ class WebhookConsumer(DLQAwareConsumer):
                         f"No processor registered for event_type '{event_type}'"
                     )
 
-                await processor.process(event.get("data", {}), {})
-
-                # Record as processed after successful handling
-                if webhook_id:
-                    await idempotency.mark_processed(
-                        webhook_id, result={"event_type": event_type}
-                    )
+                await processor.process(event.get("data", {}))
 
                 logger.info(
                     "Webhook processed",

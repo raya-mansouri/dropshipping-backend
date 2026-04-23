@@ -2,9 +2,10 @@
 Application Settings
 ====================
 Single source of truth for all environment-based configuration.
-Read via get_settings() — never via os.getenv or 
+Read via get_settings() — never via os.getenv or
 directly.
 """
+
 from functools import lru_cache
 
 from pydantic import SecretStr
@@ -32,7 +33,9 @@ class Settings(BaseSettings):
     # Redis
     # ------------------------------------------------------------------
     redis_url: str = "redis://localhost:6379/0"
-    celery_broker_url: str = ""  # Falls back to redis_url if empty (see workers/celery_config.py)
+    celery_broker_url: str = (
+        ""  # Falls back to redis_url if empty (see workers/celery_config.py)
+    )
 
     # ------------------------------------------------------------------
     # Kafka
@@ -80,17 +83,34 @@ class Settings(BaseSettings):
     image_http_timeout: float = 30.0
 
     # ------------------------------------------------------------------
+    # Kavenegar SMS
+    # ------------------------------------------------------------------
+    kavenegar_api_key: str = ""
+    kavenegar_sender: str = "10000000"
+
+    # ------------------------------------------------------------------
     # Application
     # ------------------------------------------------------------------
     app_env: str = "production"
     log_level: str = "INFO"
-    sentry_dsn: str = "https://2087dcd94d802b122cd6632bbe146c28@sentry.basalam.com/660"
-    cors_origins: str = "*"
+    sentry_dsn: str = ""
+    cors_origins: str = ""
+
+    # ------------------------------------------------------------------
+    # Payment Gateway
+    # ------------------------------------------------------------------
+    payment_gateway: str = "zarinpal"  # zarinpal, zibal
+    payment_env: str = "sandbox"  # sandbox, production
+    payment_callback_url: str = ""
+    zarinpal_merchant_id: str = ""
+    payment_fee_rate: float = 0.03  # 3% platform commission
 
     # ------------------------------------------------------------------
     # Webhook Security
     # ------------------------------------------------------------------
-    webhook_base_url: str = ""  # Base URL for webhook endpoint (e.g., https://api.example.com)
+    webhook_base_url: str = (
+        ""  # Base URL for webhook endpoint (e.g., https://api.example.com)
+    )
     webhook_default_rate_limit: int = 100  # requests per minute
     webhook_default_timestamp_tolerance: int = 300  # seconds
 

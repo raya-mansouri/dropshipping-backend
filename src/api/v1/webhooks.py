@@ -370,7 +370,8 @@ async def receive_webhook(
         or headers.get("X-Request-Id")
     )
 
-    # Idempotency check
+    # Idempotency check — uses its own isolated DB session so the
+    # idempotency record survives a business-logic rollback.
     redis = get_redis_client()
     idempotency = IdempotencyManager(redis_client=redis, db_session=session)
 
@@ -386,6 +387,7 @@ async def receive_webhook(
             client_ip=_get_client_ip(request),
             details={"event_id": external_event_id},
         )
+        await idempotency.close()
         # Return success for duplicate (idempotent)
         return WebhookResponse(
             status="accepted",
@@ -409,13 +411,14 @@ async def receive_webhook(
 
         await uow.commit()
 
-    # Mark as processed in idempotency cache
+    # Mark as processed in idempotency cache (independent transaction)
     if external_event_id:
         await idempotency.mark_processed(
             platform_id=str(platform.id),
             event_id=external_event_id,
             payload=payload,
         )
+    await idempotency.close()
 
     # Dispatch to processor
     processing_start = time_module.time()

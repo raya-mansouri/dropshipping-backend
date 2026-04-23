@@ -62,8 +62,31 @@ def decode_token(token: str) -> dict:
         )
 
 
+async def get_redis() -> AsyncGenerator[redis.Redis, None]:
+    """Get shared Redis client (singleton via core module).
+    Raises 503 if Redis is unavailable.
+    """
+    import structlog
+
+    logger = structlog.get_logger(__name__)
+    from src.core.redis_client import get_redis_client
+    try:
+        client = get_redis_client()
+        yield client
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("redis_client_init_failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Redis is temporarily unavailable",
+        )
+
+
 async def get_current_user(
-    token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+    redis_client: redis.Redis = Depends(get_redis),
 ) -> User:
     """Get current authenticated user from token"""
     payload = decode_token(token)
@@ -73,6 +96,15 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token type",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Check if the token has been blacklisted (e.g. after logout)
+    token_jti = payload.get("jti")
+    if token_jti and await redis_client.get(f"blacklist:token:{token_jti}"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -106,25 +138,6 @@ async def get_current_active_user(
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
-
-
-async def get_redis() -> AsyncGenerator[redis.Redis, None]:
-    """Get shared Redis client (singleton via core module).
-    Raises 503 if Redis is unavailable.
-    """
-    import structlog
-
-    logger = structlog.get_logger(__name__)
-    from src.core.redis_client import get_redis_client
-    try:
-        client = get_redis_client()
-        yield client
-    except Exception as e:
-        logger.error("redis_client_init_failed", error=str(e), exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Redis is temporarily unavailable",
-        )
 
 
 def require_role(*roles: str):
@@ -213,4 +226,54 @@ async def check_shop_access(
 
 async def get_event_publisher(request: Request) -> EventPublisher:
     """Get the app-level EventPublisher instance."""
-    return request.app.state.event_publisher
+    publisher = getattr(request.app.state, "event_publisher", None)
+    if publisher is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Event publisher not initialized. Service may still be starting up.",
+        )
+    return publisher
+
+
+async def get_optional_event_publisher(request: Request) -> EventPublisher | None:
+    """Get the app-level EventPublisher, or None if not initialized."""
+    return getattr(request.app.state, "event_publisher", None)
+
+
+# ---- Order Service Dependency ----
+
+
+async def get_order_service(
+    db: AsyncSession = Depends(get_db),
+    event_publisher: EventPublisher | None = Depends(get_optional_event_publisher),
+):
+    """Dependency to get an OrderService instance."""
+    from src.domains.orders.service.order_service import OrderService
+
+    return OrderService(session=db, event_publisher=event_publisher)
+
+
+# ---- Product Service Dependency ----
+
+
+async def get_product_service(
+    db: AsyncSession = Depends(get_db),
+    event_publisher: EventPublisher | None = Depends(get_optional_event_publisher),
+):
+    """Dependency to get a ProductService instance."""
+    from src.domains.products.service.product_service import ProductService
+
+    return ProductService(session=db, event_publisher=event_publisher)
+
+
+# ---- Payment Service Dependency ----
+
+
+async def get_payment_service(
+    db: AsyncSession = Depends(get_db),
+    event_publisher: EventPublisher | None = Depends(get_optional_event_publisher),
+):
+    """Dependency to get a PaymentService instance."""
+    from src.domains.payments.service import PaymentService
+
+    return PaymentService(session=db, event_publisher=event_publisher)

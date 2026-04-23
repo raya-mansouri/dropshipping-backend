@@ -63,6 +63,26 @@ class OrderRepository:
         )
         return list(result.scalars().all())
 
+    async def list_orders(
+        self,
+        shop_ids: Optional[List[uuid.UUID]] = None,
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Order]:
+        """List orders with optional shop_ids and status filters, with SQL-level pagination."""
+        stmt = select(Order)
+
+        if shop_ids is not None:
+            stmt = stmt.where(Order.shop_id.in_(shop_ids))
+
+        if status is not None:
+            stmt = stmt.where(Order.status == status)
+
+        stmt = stmt.order_by(Order.created_at.desc()).limit(limit).offset(offset)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def create(self, data: dict) -> Order:
         order = Order(**data)
         self.session.add(order)

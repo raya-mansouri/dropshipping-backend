@@ -31,7 +31,7 @@ async def main():
         ProductConsumer(bootstrap_servers=bootstrap),
         InventoryConsumer(bootstrap_servers=bootstrap),
         OrderConsumer(bootstrap_servers=bootstrap),
-        PaymentUpdatedConsumer(),  # Reads settings internally
+        PaymentUpdatedConsumer(bootstrap_servers=bootstrap),
         WebhookConsumer(bootstrap_servers=bootstrap),
         ProductSyncConsumer(bootstrap_servers=bootstrap),
     ]

@@ -142,6 +142,58 @@ class SupplierPayout(Base, UUIDMixin, TimestampMixin):
     payment = relationship("Payment", back_populates="payout")
 
 
+class TransactionType(str, Enum):
+    """Wallet transaction types"""
+    DEPOSIT = "deposit"
+    ORDER_PAYMENT = "order_payment"
+    SHIPPING = "shipping"
+    COMMISSION = "commission"
+    REFUND = "refund"
+    PAYOUT = "payout"
+
+
+class TransactionStatus(str, Enum):
+    """Wallet transaction status"""
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class WalletTransaction(Base, UUIDMixin, TimestampMixin):
+    """
+    Wallet transaction ledger
+
+    Records all wallet movements: deposits, order payments, refunds, payouts.
+    Balance is calculated as SUM(amount) for a user's completed transactions.
+    """
+    __tablename__ = "wallet_transactions"
+
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+
+    amount = Column(Numeric(15, 0), nullable=False)  # Positive for deposits/refunds, negative for payments
+    type = Column(String(30), nullable=False)  # deposit, order_payment, shipping, commission, refund, payout
+
+    status = Column(String(30), default=TransactionStatus.PENDING.value)
+
+    # Reference linking (polymorphic)
+    reference_type = Column(String(50))  # payment, order, payout
+    reference_id = Column(String(255))  # Gateway authority / order ID / payout ID
+
+    description = Column(Text)
+
+    # Gateway metadata
+    gateway = Column(String(50))
+    gateway_ref_id = Column(String(255))  # Gateway reference ID after verification
+    extra_data = Column("metadata", JSONB, default=dict)
+
+    __table_args__ = (
+        Index('idx_wallet_user', 'user_id'),
+        Index('idx_wallet_type', 'type'),
+        Index('idx_wallet_reference', 'reference_type', 'reference_id'),
+        Index('idx_wallet_status', 'status'),
+    )
+
+
 class Dispute(Base, UUIDMixin, TimestampMixin):
     """
     Dispute between seller and supplier

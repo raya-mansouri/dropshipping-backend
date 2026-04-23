@@ -3,6 +3,7 @@ Products Domain Schemas
 =======================
 Pydantic schemas for products API
 """
+
 from pydantic import BaseModel, Field, ConfigDict
 from uuid import UUID
 from datetime import datetime
@@ -36,7 +37,7 @@ class CategoryBase(BaseModel):
 
 class CategoryResponse(CategoryBase):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID
     platform_id: Optional[UUID]
     created_at: datetime
@@ -52,7 +53,7 @@ class ProductMediaBase(BaseModel):
 
 class ProductMediaResponse(ProductMediaBase):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID
     product_id: UUID
     storage_provider: Optional[str]
@@ -82,7 +83,7 @@ class SupplierProductUpdate(BaseModel):
 
 class SupplierProductResponse(SupplierProductBase):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID
     shop_id: UUID
     external_product_id: Optional[str]
@@ -103,7 +104,7 @@ class ProductVariantBase(BaseModel):
 
 class ProductVariantResponse(ProductVariantBase):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID
     product_id: UUID
     created_at: datetime
@@ -122,7 +123,7 @@ class SupplierVariantCreate(SupplierVariantBase):
 
 class SupplierVariantResponse(SupplierVariantBase):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID
     supplier_product_id: UUID
     variant_id: UUID
@@ -157,7 +158,7 @@ class SellerListingUpdate(BaseModel):
 
 class SellerListingResponse(SellerListingBase):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID
     shop_id: UUID
     supplier_product_id: UUID
@@ -171,13 +172,15 @@ class SellerListingResponse(SellerListingBase):
 
 # Seller Variant
 class SellerVariantBase(BaseModel):
-    custom_price: Optional[Decimal] = Field(None, description="Seller's custom price override in Toman")
+    custom_price: Optional[Decimal] = Field(
+        None, description="Seller's custom price override in Toman"
+    )
     is_enabled: bool = True
 
 
 class SellerVariantResponse(SellerVariantBase):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID
     listing_id: UUID
     supplier_variant_id: UUID
@@ -191,16 +194,21 @@ class SellerVariantResponse(SellerVariantBase):
 class CatalogProductFilter(BaseModel):
     shop_id: Optional[UUID] = None
     category_id: Optional[UUID] = None
-    min_price: Optional[Decimal] = Field(None, description="Minimum price filter in Toman")
-    max_price: Optional[Decimal] = Field(None, description="Maximum price filter in Toman")
+    min_price: Optional[Decimal] = Field(
+        None, description="Minimum price filter in Toman"
+    )
+    max_price: Optional[Decimal] = Field(
+        None, description="Maximum price filter in Toman"
+    )
     in_stock_only: bool = False
     search: Optional[str] = None
 
 
 class CatalogProductResponse(BaseModel):
     """Product as seen in catalog"""
+
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID
     title: str
     description: Optional[str]
@@ -209,5 +217,5 @@ class CatalogProductResponse(BaseModel):
     max_price: Decimal = Field(description="Maximum variant price in Toman")
     has_variants: bool
     images: List[ProductMediaResponse]
-    supplier_name: str
+    supplier_name: Optional[str]
     available: bool

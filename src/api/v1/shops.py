@@ -144,6 +144,23 @@ async def connect_platform(
             if "already has an active integration" in error_msg:
                 raise HTTPException(status_code=409, detail=error_msg)
             raise HTTPException(status_code=400, detail=error_msg)
+        except Exception:
+            # Webhook registration failed — retry without webhooks
+            try:
+                integration = await service.connect_shop(
+                    shop_id=shop_id,
+                    platform_code=connect_data.platform_code,
+                    credentials={
+                        **connect_data.credentials,
+                        "connection_type": connect_data.connection_type,
+                    },
+                    register_webhooks=False,
+                )
+            except ValueError as e:
+                error_msg = str(e)
+                if "already has an active integration" in error_msg:
+                    raise HTTPException(status_code=409, detail=error_msg)
+                raise HTTPException(status_code=400, detail=error_msg)
     return integration
 
 

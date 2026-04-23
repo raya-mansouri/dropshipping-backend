@@ -40,9 +40,14 @@ class NotificationManager:
     
     def _register_default_adapters(self):
         """Register built-in adapters"""
-        # These would be initialized with proper config
-        # In production, load from config
-        pass
+        self.register_adapter(
+            NotificationChannel.IN_APP,
+            InAppNotificationAdapter(),
+        )
+        self.register_adapter(
+            NotificationChannel.WEBHOOK,
+            WebhookNotificationAdapter(),
+        )
     
     def register_adapter(self, channel: NotificationChannel, adapter: NotificationPort):
         """Register a notification adapter for a channel"""

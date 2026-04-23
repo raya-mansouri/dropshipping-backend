@@ -9,7 +9,7 @@ Handles:
 - Seller listings (what sellers offer)
 - Categories with franchise rules
 """
-from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Numeric, Integer, Text, Index
+from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Numeric, Integer, Text, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from src.core.database import Base, TimestampMixin, UUIDMixin
@@ -77,6 +77,7 @@ class SupplierProduct(Base, UUIDMixin, TimestampMixin):
         Index('idx_supplier_products_shop', 'shop_id'),
         Index('idx_supplier_products_external', 'external_product_id'),
         Index('idx_supplier_products_status', 'status'),
+        UniqueConstraint('shop_id', 'external_product_id', name='uq_supplier_products_shop_external'),
     )
 
 
@@ -125,6 +126,10 @@ class SupplierVariant(Base, UUIDMixin, TimestampMixin):
     reservations = relationship("InventoryReservation", back_populates="variant")
     inventory_logs = relationship("InventoryLog", back_populates="variant")
     seller_variants = relationship("SellerVariant", back_populates="supplier_variant")
+
+    __table_args__ = (
+        UniqueConstraint('supplier_product_id', 'variant_id', name='uq_supplier_variants_product_variant'),
+    )
     
     @property
     def available_inventory(self) -> int:
