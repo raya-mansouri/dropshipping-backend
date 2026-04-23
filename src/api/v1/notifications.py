@@ -5,13 +5,13 @@ FastAPI endpoints for notification management
 """
 
 from uuid import UUID
-from typing import List, Optional
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_db, get_current_user
 from src.domains.accounts.models import User
-from src.domains.notifications.models import Notification, NotificationStatus
+from src.domains.notifications.models import NotificationStatus
 from src.domains.notifications.schemas import (
     NotificationResponse,
     UnreadCountResponse,
@@ -42,11 +42,15 @@ async def list_notifications(
     repo = NotificationRepository(db)
 
     if unread_only:
-        notifications = await repo.get_unread(current_user.id)
+        notifications = await repo.get_unread(
+            current_user.id, limit=limit, offset=offset
+        )
     else:
-        notifications = await repo.get_by_user(current_user.id)
+        notifications = await repo.get_by_user(
+            current_user.id, limit=limit, offset=offset
+        )
 
-    return notifications[offset : offset + limit]
+    return notifications
 
 
 @router.patch("/{notification_id}/read", response_model=NotificationResponse)

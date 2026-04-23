@@ -23,10 +23,6 @@ from src.api.deps import (
 )
 from src.domains.accounts.models import User
 from src.domains.orders.models import (
-    Order,
-    OrderItem,
-    OrderHistory,
-    Shipment,
     OrderStatus as ModelOrderStatus,
 )
 from src.domains.orders.schemas import (
@@ -81,7 +77,9 @@ async def create_order(
         {
             "variant_id": str(item.variant_id),
             "quantity": item.quantity,
-            "seller_listing_id": str(item.seller_listing_id) if item.seller_listing_id else None,
+            "seller_listing_id": str(item.seller_listing_id)
+            if item.seller_listing_id
+            else None,
         }
         for item in order_data.items
     ]
@@ -114,43 +112,38 @@ async def list_orders(
     order_service: OrderService = Depends(get_order_service),
 ):
     """List orders with filters. Scoped to user's shops unless admin."""
-    if shop_id:
-        await check_shop_access(db, shop_id, current_user)
+    status_value = status.value if status else None
 
     if shop_id:
-        orders = await order_service.get_orders_by_shop(shop_id)
-        if status:
-            orders = [o for o in orders if o.status == status.value]
-        orders = orders[offset : offset + limit]
-    elif status:
-        orders = await order_service.get_orders_by_status(ModelOrderStatus(status.value))
-        orders = orders[offset : offset + limit]
-    elif not is_admin(current_user):
-        # Scope to orders belonging to user's shops
+        await check_shop_access(db, shop_id, current_user)
+        orders = await order_service.list_orders(
+            shop_ids=[shop_id],
+            status=status_value,
+            limit=limit,
+            offset=offset,
+        )
+    elif is_admin(current_user):
+        orders = await order_service.list_orders(
+            status=status_value,
+            limit=limit,
+            offset=offset,
+        )
+    else:
+        # Non-admin, no specific shop: scope to user's shops only
         user_shops_result = await db.execute(
             select(Shop.id)
             .join(Account, Shop.account_id == Account.id)
             .where(Account.owner_user_id == current_user.id)
         )
         user_shop_ids = [row[0] for row in user_shops_result.all()]
-        all_orders = []
-        for sid in user_shop_ids:
-            shop_orders = await order_service.get_orders_by_shop(sid)
-            all_orders.extend(shop_orders)
-        all_orders.sort(key=lambda o: o.created_at, reverse=True)
-        orders = all_orders[offset : offset + limit]
-    else:
-        # Admin with no filters: paginate across all shops via service
-        # Fall back to a single-shop approach using the first available shop
-        # or an empty list if no shops exist. This matches the original
-        # behaviour where an unfiltered admin query returned all orders.
-        result = await db.execute(
-            select(Order)
-            .order_by(Order.created_at.desc())
-            .limit(limit)
-            .offset(offset)
+        if not user_shop_ids:
+            return []
+        orders = await order_service.list_orders(
+            shop_ids=user_shop_ids,
+            status=status_value,
+            limit=limit,
+            offset=offset,
         )
-        orders = list(result.scalars().all())
 
     return orders
 

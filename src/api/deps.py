@@ -4,7 +4,7 @@ API Dependencies
 Common FastAPI dependencies for dependency injection
 """
 
-from typing import Optional, AsyncGenerator
+from typing import AsyncGenerator
 from uuid import UUID
 
 import redis.asyncio as redis
@@ -237,7 +237,16 @@ async def get_event_publisher(request: Request) -> EventPublisher:
 
 async def get_optional_event_publisher(request: Request) -> EventPublisher | None:
     """Get the app-level EventPublisher, or None if not initialized."""
-    return getattr(request.app.state, "event_publisher", None)
+    publisher = getattr(request.app.state, "event_publisher", None)
+    if publisher is None:
+        import structlog
+
+        logger = structlog.get_logger(__name__)
+        logger.warning(
+            "event_publisher_not_available",
+            msg="Domain events will be silently dropped",
+        )
+    return publisher
 
 
 # ---- Order Service Dependency ----

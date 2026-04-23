@@ -29,15 +29,27 @@ class NotificationRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_by_user(self, user_id: uuid.UUID) -> List[Notification]:
+    async def get_by_user(
+        self,
+        user_id: uuid.UUID,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Notification]:
         result = await self.session.execute(
             select(Notification)
             .where(Notification.user_id == user_id)
             .order_by(Notification.created_at.desc())
+            .limit(limit)
+            .offset(offset)
         )
         return list(result.scalars().all())
 
-    async def get_unread(self, user_id: uuid.UUID) -> List[Notification]:
+    async def get_unread(
+        self,
+        user_id: uuid.UUID,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Notification]:
         result = await self.session.execute(
             select(Notification)
             .where(
@@ -45,6 +57,8 @@ class NotificationRepository:
                 Notification.status != NotificationStatus.READ.value,
             )
             .order_by(Notification.created_at.desc())
+            .limit(limit)
+            .offset(offset)
         )
         return list(result.scalars().all())
 
@@ -59,7 +73,9 @@ class NotificationRepository:
         await self.session.execute(
             update(Notification)
             .where(Notification.id == id)
-            .values(status=NotificationStatus.READ.value, read_at=datetime.now(timezone.utc))
+            .values(
+                status=NotificationStatus.READ.value, read_at=datetime.now(timezone.utc)
+            )
         )
         await self.session.flush()
         return await self.get_by_id(id)
@@ -71,7 +87,9 @@ class NotificationRepository:
                 Notification.user_id == user_id,
                 Notification.status != NotificationStatus.READ.value,
             )
-            .values(status=NotificationStatus.READ.value, read_at=datetime.now(timezone.utc))
+            .values(
+                status=NotificationStatus.READ.value, read_at=datetime.now(timezone.utc)
+            )
         )
         await self.session.flush()
         return result.rowcount

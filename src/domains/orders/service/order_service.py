@@ -154,7 +154,9 @@ class OrderService:
         try:
             await self._event_publisher.publish(topic="events", event=event)
         except Exception as e:
-            logger.warning("failed_to_publish_event", event_type=event.event_type, error=str(e))
+            logger.warning(
+                "failed_to_publish_event", event_type=event.event_type, error=str(e)
+            )
 
     async def _record_history(
         self,
@@ -391,7 +393,10 @@ class OrderService:
                 f"Cannot transition from {current_status.value} to {new_status.value}"
             )
 
-        update_data = {"status": new_status.value, "updated_at": datetime.now(timezone.utc)}
+        update_data = {
+            "status": new_status.value,
+            "updated_at": datetime.now(timezone.utc),
+        }
 
         timestamp_field = {
             OrderStatus.CONFIRMED: "confirmed_at",
@@ -537,6 +542,21 @@ class OrderService:
             .order_by(OrderHistory.created_at.desc())
         )
         return list(result.scalars().all())
+
+    async def list_orders(
+        self,
+        shop_ids: Optional[List[UUID]] = None,
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Order]:
+        """List orders with optional shop_ids and status filters, with SQL-level pagination."""
+        return await self._order_repo.list_orders(
+            shop_ids=shop_ids,
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
 
 
 class OrderItemService:

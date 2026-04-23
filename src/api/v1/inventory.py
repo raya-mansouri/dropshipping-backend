@@ -9,13 +9,12 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from datetime import datetime, timezone
 
 from src.api.deps import get_db, get_current_user, check_shop_access, is_admin
+from src.core.repository.unit_of_work import UnitOfWork
 from src.domains.accounts.models import User
 from src.domains.inventory.models import (
     InventoryReservation,
-    InventoryLog,
     InventorySource,
 )
 from src.domains.inventory.schemas import (
@@ -30,7 +29,6 @@ from src.domains.inventory.schemas import (
 from src.domains.inventory.repository import (
     InventoryRepository,
     InventoryLogRepository,
-    InventoryReservationRepository,
 )
 from src.domains.products.models import SupplierVariant, SupplierProduct, ProductVariant
 from src.domains.shops.models import Shop
@@ -50,7 +48,9 @@ router = APIRouter(prefix="/inventory", tags=["inventory"])
 async def list_variant_inventory(
     shop_id: UUID,
     product_id: Optional[UUID] = None,
-    low_stock_only: bool = Query(False, description="Only return variants with low stock"),
+    low_stock_only: bool = Query(
+        False, description="Only return variants with low stock"
+    ),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -155,53 +155,59 @@ async def override_inventory(
             detail="Inventory override is only allowed for supplier shops",
         )
 
-    # Load variant and verify it belongs to the shop
-    inv_repo = InventoryRepository(db)
-    supplier_variant = await inv_repo.get_by_variant_id(variant_id)
-    if not supplier_variant:
-        raise HTTPException(status_code=404, detail="Variant not found")
+    async with UnitOfWork(db) as uow:
+        session = uow.session
 
-    # Ownership check: variant's product must belong to this shop
-    product_result = await db.execute(
-        select(SupplierProduct.id).where(
-            SupplierProduct.id == supplier_variant.supplier_product_id,
-            SupplierProduct.shop_id == shop_id,
+        # Load variant and verify it belongs to the shop
+        inv_repo = InventoryRepository(session)
+        supplier_variant = await inv_repo.get_by_variant_id(variant_id)
+        if not supplier_variant:
+            raise HTTPException(status_code=404, detail="Variant not found")
+
+        # Ownership check: variant's product must belong to this shop
+        product_result = await session.execute(
+            select(SupplierProduct.id).where(
+                SupplierProduct.id == supplier_variant.supplier_product_id,
+                SupplierProduct.shop_id == shop_id,
+            )
         )
-    )
-    if not product_result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Variant does not belong to this shop",
+        if not product_result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Variant does not belong to this shop",
+            )
+
+        old_inventory = supplier_variant.inventory
+        new_inventory = body.quantity
+
+        supplier_variant.inventory = new_inventory
+        await uow.flush()
+
+        # Load ProductVariant for response enrichment
+        pv_result = await session.execute(
+            select(ProductVariant).where(
+                ProductVariant.id == supplier_variant.variant_id
+            )
+        )
+        pv = pv_result.scalar_one_or_none()
+
+        # Create audit log
+        log_repo = InventoryLogRepository(session)
+        await log_repo.create(
+            {
+                "variant_id": supplier_variant.id,
+                "old_inventory": old_inventory,
+                "new_inventory": new_inventory,
+                "change": new_inventory - old_inventory,
+                "source": InventorySource.MANUAL.value,
+                "reference_type": "manual",
+                "reason": body.reason,
+            }
         )
 
-    old_inventory = supplier_variant.inventory
-    new_inventory = body.quantity
-
-    supplier_variant.inventory = new_inventory
-    await db.flush()
-
-    # Load ProductVariant for response enrichment
-    pv_result = await db.execute(
-        select(ProductVariant).where(ProductVariant.id == supplier_variant.variant_id)
-    )
-    pv = pv_result.scalar_one_or_none()
-
-    # Create audit log
-    log_repo = InventoryLogRepository(db)
-    await log_repo.create(
-        {
-            "variant_id": supplier_variant.id,
-            "old_inventory": old_inventory,
-            "new_inventory": new_inventory,
-            "change": new_inventory - old_inventory,
-            "source": InventorySource.MANUAL.value,
-            "reference_type": "manual",
-            "reason": body.reason,
-        }
-    )
-
-    await db.flush()
-    await db.refresh(supplier_variant)
+        await uow.flush()
+        await uow.refresh(supplier_variant)
+        await uow.commit()
 
     return VariantInventoryResponse(
         id=supplier_variant.id,
@@ -241,14 +247,16 @@ async def list_reservations(
 
     if shop_id:
         # Filter reservations whose variant belongs to a product in this shop
-        query = query.join(
-            SupplierVariant,
-            InventoryReservation.variant_id == SupplierVariant.id,
-        ).join(
-            SupplierProduct,
-            SupplierVariant.supplier_product_id == SupplierProduct.id,
-        ).where(
-            SupplierProduct.shop_id == shop_id
+        query = (
+            query.join(
+                SupplierVariant,
+                InventoryReservation.variant_id == SupplierVariant.id,
+            )
+            .join(
+                SupplierProduct,
+                SupplierVariant.supplier_product_id == SupplierProduct.id,
+            )
+            .where(SupplierProduct.shop_id == shop_id)
         )
     elif not is_admin(current_user):
         # Scope to user's shops
@@ -260,15 +268,24 @@ async def list_reservations(
             .where(Account.owner_user_id == current_user.id)
         )
         query = (
-            query.join(SupplierVariant, InventoryReservation.variant_id == SupplierVariant.id)
-            .join(SupplierProduct, SupplierVariant.supplier_product_id == SupplierProduct.id)
+            query.join(
+                SupplierVariant, InventoryReservation.variant_id == SupplierVariant.id
+            )
+            .join(
+                SupplierProduct,
+                SupplierVariant.supplier_product_id == SupplierProduct.id,
+            )
             .where(SupplierProduct.shop_id.in_(user_shops))
         )
 
     if status_filter:
         query = query.where(InventoryReservation.status == status_filter.value)
 
-    query = query.order_by(InventoryReservation.created_at.desc()).limit(limit).offset(offset)
+    query = (
+        query.order_by(InventoryReservation.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
 
     result = await db.execute(query)
     return result.scalars().all()
@@ -293,49 +310,54 @@ async def adjust_inventory(
     """
     await check_shop_access(db, shop_id, current_user)
 
-    inv_repo = InventoryRepository(db)
-    supplier_variant = await inv_repo.get_by_variant_id(variant_id)
-    if not supplier_variant:
-        raise HTTPException(status_code=404, detail="Variant not found")
+    async with UnitOfWork(db) as uow:
+        session = uow.session
 
-    # Ownership check
-    product_result = await db.execute(
-        select(SupplierProduct.id).where(
-            SupplierProduct.id == supplier_variant.supplier_product_id,
-            SupplierProduct.shop_id == shop_id,
+        inv_repo = InventoryRepository(session)
+        supplier_variant = await inv_repo.get_by_variant_id(variant_id)
+        if not supplier_variant:
+            raise HTTPException(status_code=404, detail="Variant not found")
+
+        # Ownership check
+        product_result = await session.execute(
+            select(SupplierProduct.id).where(
+                SupplierProduct.id == supplier_variant.supplier_product_id,
+                SupplierProduct.shop_id == shop_id,
+            )
         )
-    )
-    if not product_result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Variant does not belong to this shop",
+        if not product_result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Variant does not belong to this shop",
+            )
+
+        old_inventory = supplier_variant.inventory
+        new_inventory = old_inventory + body.quantity_change
+
+        if new_inventory < 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Adjustment would result in negative inventory ({new_inventory})",
+            )
+
+        supplier_variant.inventory = new_inventory
+        await uow.flush()
+
+        # Create audit log
+        log_repo = InventoryLogRepository(session)
+        log_entry = await log_repo.create(
+            {
+                "variant_id": supplier_variant.id,
+                "old_inventory": old_inventory,
+                "new_inventory": new_inventory,
+                "change": body.quantity_change,
+                "source": InventorySource.MANUAL.value,
+                "reference_type": "manual",
+                "reason": body.reason,
+            }
         )
 
-    old_inventory = supplier_variant.inventory
-    new_inventory = old_inventory + body.quantity_change
+        await uow.flush()
+        await uow.commit()
 
-    if new_inventory < 0:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Adjustment would result in negative inventory ({new_inventory})",
-        )
-
-    supplier_variant.inventory = new_inventory
-    await db.flush()
-
-    # Create audit log
-    log_repo = InventoryLogRepository(db)
-    log_entry = await log_repo.create(
-        {
-            "variant_id": supplier_variant.id,
-            "old_inventory": old_inventory,
-            "new_inventory": new_inventory,
-            "change": body.quantity_change,
-            "source": InventorySource.MANUAL.value,
-            "reference_type": "manual",
-            "reason": body.reason,
-        }
-    )
-
-    await db.flush()
     return log_entry

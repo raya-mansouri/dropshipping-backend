@@ -6,14 +6,17 @@ shops, users, sync status, and webhooks.
 
 All admin actions are recorded via AuditLogService for compliance.
 """
+
+import asyncio
+
 import structlog
 from datetime import datetime, timedelta, timezone
-from typing import Literal, Optional
+from typing import Any, Dict, Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -639,9 +642,11 @@ async def update_user(
 
 
 # --- System-wide read endpoints ---
+# TODO: Replace Dict[str, Any] response_model with proper Pydantic schemas
+# for list_all_orders, list_all_payments, and list_all_disputes.
 
 
-@router.get("/orders")
+@router.get("/orders", response_model=Dict[str, Any])
 async def list_all_orders(
     status: Optional[str] = None,
     shop_id: Optional[UUID] = None,
@@ -683,56 +688,41 @@ async def admin_dashboard(
     current_user=Depends(require_admin),
 ):
     """Aggregated system-wide stats for the admin dashboard."""
-    # Total orders
-    total_orders_result = await session.execute(
-        select(func.count(Order.id))
-    )
-    total_orders = total_orders_result.scalar() or 0
-
-    # Total revenue (sum of total_price across all orders)
-    total_revenue_result = await session.execute(
-        select(func.coalesce(func.sum(Order.total_price), 0))
-    )
-    total_revenue = float(total_revenue_result.scalar() or 0)
-
-    # Active shops
-    active_shops_result = await session.execute(
-        select(func.count(Shop.id)).where(Shop.status == "active")
-    )
-    active_shops = active_shops_result.scalar() or 0
-
-    # Total users
-    total_users_result = await session.execute(
-        select(func.count(User.id))
-    )
-    total_users = total_users_result.scalar() or 0
-
-    # Recent orders count (last 24 hours)
     yesterday = datetime.now(timezone.utc) - timedelta(hours=24)
-    recent_orders_result = await session.execute(
-        select(func.count(Order.id)).where(Order.created_at >= yesterday)
-    )
-    recent_orders_count = recent_orders_result.scalar() or 0
 
-    # Pending payouts amount (sum of amount for payouts in 'pending' status)
-    pending_payouts_result = await session.execute(
-        select(func.coalesce(func.sum(SupplierPayout.amount), 0)).where(
-            SupplierPayout.status == "pending"
-        )
+    (
+        total_orders_result,
+        total_revenue_result,
+        active_shops_result,
+        total_users_result,
+        recent_orders_result,
+        pending_payouts_result,
+    ) = await asyncio.gather(
+        session.execute(select(func.count(Order.id))),
+        session.execute(select(func.coalesce(func.sum(Order.total_price), 0))),
+        session.execute(select(func.count(Shop.id)).where(Shop.status == "active")),
+        session.execute(select(func.count(User.id))),
+        session.execute(
+            select(func.count(Order.id)).where(Order.created_at >= yesterday)
+        ),
+        session.execute(
+            select(func.coalesce(func.sum(SupplierPayout.amount), 0)).where(
+                SupplierPayout.status == "pending"
+            )
+        ),
     )
-    pending_payouts_amount = float(pending_payouts_result.scalar() or 0)
 
     return {
-        "total_orders": total_orders,
-        "total_revenue": total_revenue,
-        "active_shops": active_shops,
-        "total_users": total_users,
-        "recent_orders_count": recent_orders_count,
-        "pending_payouts_amount": pending_payouts_amount,
+        "total_orders": total_orders_result.scalar() or 0,
+        "total_revenue": float(total_revenue_result.scalar() or 0),
+        "active_shops": active_shops_result.scalar() or 0,
+        "total_users": total_users_result.scalar() or 0,
+        "recent_orders_count": recent_orders_result.scalar() or 0,
+        "pending_payouts_amount": float(pending_payouts_result.scalar() or 0),
     }
 
 
-@router.get("/payments")
+@router.get("/payments", response_model=Dict[str, Any])
 async def list_all_payments(
     status: Optional[str] = None,
     limit: int = 50,
@@ -741,7 +731,9 @@ async def list_all_payments(
     current_user=Depends(require_admin),
 ):
     """List all payments across all shops. Admin only."""
-    stmt = select(Payment).order_by(Payment.created_at.desc()).offset(offset).limit(limit)
+    stmt = (
+        select(Payment).order_by(Payment.created_at.desc()).offset(offset).limit(limit)
+    )
     if status:
         stmt = stmt.where(Payment.status == status)
 
@@ -754,8 +746,12 @@ async def list_all_payments(
                 "id": str(p.id),
                 "order_id": str(p.order_id),
                 "status": p.status,
-                "seller_paid_amount": float(p.seller_paid_amount) if p.seller_paid_amount else 0,
-                "supplier_payable_amount": float(p.supplier_payable_amount) if p.supplier_payable_amount else 0,
+                "seller_paid_amount": float(p.seller_paid_amount)
+                if p.seller_paid_amount
+                else 0,
+                "supplier_payable_amount": float(p.supplier_payable_amount)
+                if p.supplier_payable_amount
+                else 0,
                 "platform_fee": float(p.platform_fee) if p.platform_fee else 0,
                 "gateway": p.gateway,
                 "created_at": p.created_at.isoformat() if p.created_at else None,
@@ -766,7 +762,7 @@ async def list_all_payments(
     }
 
 
-@router.get("/disputes")
+@router.get("/disputes", response_model=Dict[str, Any])
 async def list_all_disputes(
     status: Optional[str] = None,
     limit: int = 50,
@@ -775,7 +771,9 @@ async def list_all_disputes(
     current_user=Depends(require_admin),
 ):
     """List all disputes across all orders. Admin only."""
-    stmt = select(Dispute).order_by(Dispute.created_at.desc()).offset(offset).limit(limit)
+    stmt = (
+        select(Dispute).order_by(Dispute.created_at.desc()).offset(offset).limit(limit)
+    )
     if status:
         stmt = stmt.where(Dispute.status == status)
 

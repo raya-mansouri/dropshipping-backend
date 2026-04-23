@@ -6,7 +6,9 @@ Read via get_settings() — never via os.getenv or
 directly.
 """
 
+from decimal import Decimal
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -99,11 +101,11 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Payment Gateway
     # ------------------------------------------------------------------
-    payment_gateway: str = "zarinpal"  # zarinpal, zibal
-    payment_env: str = "sandbox"  # sandbox, production
+    payment_gateway: Literal["zarinpal", "zibal"] = "zarinpal"
+    payment_env: Literal["sandbox", "production"] = "sandbox"
     payment_callback_url: str = ""
     zarinpal_merchant_id: str = ""
-    payment_fee_rate: float = 0.03  # 3% platform commission
+    payment_fee_rate: Decimal = Decimal("0.03")  # 3% platform commission
 
     # ------------------------------------------------------------------
     # Webhook Security
