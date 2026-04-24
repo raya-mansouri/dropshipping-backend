@@ -543,6 +543,12 @@ class OrderService:
         )
         return list(result.scalars().all())
 
+    async def get_order_by_external_id(
+        self, shop_id: UUID, external_id: str
+    ) -> Optional[Order]:
+        """Get order by shop_id and external_order_id"""
+        return await self._order_repo.get_by_external_id(shop_id, external_id)
+
     async def list_orders(
         self,
         shop_ids: Optional[List[UUID]] = None,

@@ -98,7 +98,10 @@ class ShopIntegrationResponse(ShopIntegrationBase):
     status: str
     external_shop_id: Optional[str]
     connection_type: str
+    webhook_status: Optional[str] = None
+    last_sync_started_at: Optional[datetime] = None
     last_synced_at: Optional[datetime]
+    last_error: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

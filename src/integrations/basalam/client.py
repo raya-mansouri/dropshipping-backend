@@ -366,6 +366,104 @@ class BasalamClient:
         response = await self.retry_policy.execute(_fetch)
         return basalam_order_to_internal(response.get("data", {}))
 
+    # ------------------------------------------------------------------
+    # Parcel / Shipment operations
+    # ------------------------------------------------------------------
+
+    async def list_vendor_parcels(
+        self,
+        vendor_id: Optional[str] = None,
+        order_id: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> Dict[str, Any]:
+        """List vendor parcels, optionally filtered by order_id.
+
+        GETs /vendor/parcels with pagination and optional filters.
+        Returns raw parcels data and pagination cursor.
+        """
+        async def _fetch():
+            params: Dict[str, Any] = {"page": page, "per_page": per_page}
+            if vendor_id:
+                params["vendor_id"] = vendor_id
+            if order_id:
+                params["order_id"] = order_id
+            return await self._request(
+                "GET",
+                "/vendor/parcels",
+                rate_limit_endpoint="orders",
+                params=params,
+            )
+
+        response = await self.retry_policy.execute(_fetch)
+        parcels = response.get("data", [])
+        return {
+            "parcels": parcels,
+            "pagination": response.get("pagination", {}),
+        }
+
+    async def get_order_parcel(self, parcel_id: str) -> Dict[str, Any]:
+        """Get details for a specific parcel.
+
+        GETs /vendor/parcels/{parcel_id}.
+        """
+        async def _fetch():
+            return await self._request(
+                "GET",
+                f"/vendor/parcels/{parcel_id}",
+                rate_limit_endpoint="orders",
+            )
+
+        response = await self.retry_policy.execute(_fetch)
+        return response.get("data", {})
+
+    async def set_parcel_preparation(self, parcel_id: str) -> Dict[str, Any]:
+        """Mark a parcel as in preparation.
+
+        PATCHes /vendor/parcels/{parcel_id}/preparation.
+        """
+        async def _fetch():
+            return await self._request(
+                "PATCH",
+                f"/vendor/parcels/{parcel_id}/preparation",
+                rate_limit_endpoint="orders",
+            )
+
+        response = await self.retry_policy.execute(_fetch)
+        return response.get("data", {})
+
+    async def set_parcel_posted(
+        self,
+        parcel_id: str,
+        tracking_code: str,
+        shipping_method: str = "EXPRESS",
+    ) -> Dict[str, Any]:
+        """Mark a parcel as posted/shipped with tracking info.
+
+        PATCHes /vendor/parcels/{parcel_id}/posted with tracking_code
+        and shipping_method.
+
+        Args:
+            parcel_id: The parcel identifier from Basalam.
+            tracking_code: Carrier tracking code for the shipment.
+            shipping_method: One of the Basalam ShippingMethodCode values
+                (SPECIAL, EXPRESS, COURIER, TRANSIT, TIPAX, MAHEX, CHAPAR,
+                AMADAST, DECA, CHEETA, BOXIT, SALAM_RESAN).
+        """
+        async def _fetch():
+            return await self._request(
+                "PATCH",
+                f"/vendor/parcels/{parcel_id}/posted",
+                rate_limit_endpoint="orders",
+                json={
+                    "tracking_code": tracking_code,
+                    "shipping_method": shipping_method,
+                },
+            )
+
+        response = await self.retry_policy.execute(_fetch)
+        return response.get("data", {})
+
     async def get_inventory(self, product_id: str) -> Dict[str, Any]:
         async def _fetch():
             return await self._request(

@@ -4,15 +4,24 @@ Sync Service
 Business logic for sync job management
 """
 
-from typing import List, Optional, Dict, Any
+import structlog
+from typing import List, Optional, Dict, Any, Callable, Awaitable
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..repository import SyncJobRepository, ShopIntegrationRepository, SyncStateRepository
-from ..models import SyncJob, ShopIntegration
+from ..models import SyncJob, ShopIntegration, SyncState
 from src.core.repository.unit_of_work import UnitOfWork
+
+logger = structlog.get_logger(__name__)
+
+
+# Type alias for sync strategy callables.
+# A SyncStrategy receives an integration and returns a result dict
+# with keys: created_count, updated_count, failed_count, skipped_count, error.
+SyncStrategy = Callable[[ShopIntegration], Awaitable[Dict[str, Any]]]
 
 
 class SyncService:
@@ -22,17 +31,25 @@ class SyncService:
     Handles creating, running, scheduling, and managing sync operations.
     """
 
-    def __init__(self, session: AsyncSession):
+    def __init__(
+        self,
+        session: AsyncSession,
+        sync_strategies: Optional[Dict[str, SyncStrategy]] = None,
+    ):
         """
         Initialize service with database session.
 
         Args:
             session: Async SQLAlchemy session for database operations
+            sync_strategies: Mapping of entity_type to sync callable.
+                If provided, ``run_sync`` dispatches via this dict instead
+                of the built-in Basalam-specific sync methods.
         """
         self.session = session
         self._sync_repository = SyncJobRepository(session)
         self._integration_repository = ShopIntegrationRepository(session)
         self._sync_state_repository = SyncStateRepository(session)
+        self._sync_strategies = sync_strategies or {}
 
     async def _get_integration_or_fail(
         self, integration_id: uuid.UUID
@@ -127,27 +144,28 @@ class SyncService:
                 "Only 'pending' or 'failed' jobs can be executed."
             )
 
-        await self._sync_repository.update_status(job_id, "running")
+        async with UnitOfWork(self.session):
+            # Mark running inside a savepoint so a later failure
+            # doesn't lose the status transition.
+            async with self.session.begin_nested():
+                await self._sync_repository.update_status(job_id, "running")
+                job = await self._get_job_or_fail(job_id)
+                job.started_at = datetime.now(timezone.utc)
 
-        job = await self._get_job_or_fail(job_id)
-        job.started_at = datetime.now(timezone.utc)
-        await self.session.flush()
+            try:
+                await self._perform_sync(job)
+            except Exception:
+                async with self.session.begin_nested():
+                    await self._sync_repository.update_status(job_id, "failed")
+                    job = await self._get_job_or_fail(job_id)
+                    job.error_message = str(e)
+                    job.completed_at = datetime.now(timezone.utc)
+                raise
 
-        try:
-            await self._perform_sync(job)
-
-            await self._sync_repository.update_status(job_id, "completed")
-            job = await self._get_job_or_fail(job_id)
-            job.completed_at = datetime.now(timezone.utc)
-            await self.session.flush()
-
-        except Exception as e:
-            await self._sync_repository.update_status(job_id, "failed")
-            job = await self._get_job_or_fail(job_id)
-            job.error_message = str(e)
-            job.completed_at = datetime.now(timezone.utc)
-            await self.session.flush()
-            raise
+            async with self.session.begin_nested():
+                await self._sync_repository.update_status(job_id, "completed")
+                job = await self._get_job_or_fail(job_id)
+                job.completed_at = datetime.now(timezone.utc)
 
         return await self._get_job_or_fail(job_id)
 
@@ -155,17 +173,35 @@ class SyncService:
         """
         Perform the actual sync operation.
 
-        This is a placeholder - actual sync logic would be implemented
-        based on entity type and platform specifics.
+        Dispatches to a registered sync strategy if available, otherwise
+        falls back to the built-in Basalam-specific sync methods.
 
         Args:
             job: SyncJob instance to execute
+
+        Raises:
+            ValueError: If integration not found or entity_type is unsupported
         """
         integration = await self._integration_repository.get_by_id(job.integration_id)
 
         if not integration:
             raise ValueError(
                 f"Integration '{job.integration_id}' not found during sync"
+            )
+
+        entity_type = job.entity_type
+
+        if entity_type in self._sync_strategies:
+            result = await self._sync_strategies[entity_type](integration)
+            await self._update_sync_state_from_result(
+                integration_id=integration.id,
+                entity_type=entity_type,
+                **result,
+            )
+        else:
+            raise ValueError(
+                f"No sync strategy registered for entity_type '{entity_type}'. "
+                f"Provide sync_strategies to SyncService constructor."
             )
 
     async def schedule_sync(

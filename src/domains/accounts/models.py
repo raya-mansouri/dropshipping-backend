@@ -23,7 +23,6 @@ class User(Base, UUIDMixin, TimestampMixin):
     
     # Relationships
     accounts = relationship("Account", back_populates="owner")
-    notifications = relationship("Notification", back_populates="user")
 
 
 class Account(Base, UUIDMixin, TimestampMixin):
@@ -44,35 +43,3 @@ class Account(Base, UUIDMixin, TimestampMixin):
     owner = relationship("User", back_populates="accounts")
     shops = relationship("Shop", back_populates="account")
 
-
-# Association table for account roles
-account_roles = Table(
-    'account_roles',
-    Base.metadata,
-    Column('account_id', UUID(as_uuid=True), ForeignKey('accounts.id')),
-    Column('role_id', UUID(as_uuid=True), ForeignKey('roles.id'))
-)
-
-
-class Role(Base, UUIDMixin, TimestampMixin):
-    """Roles for access control"""
-    __tablename__ = "roles"
-    
-    name = Column(String(50), unique=True, nullable=False)
-    description = Column(String(255))
-    permissions = Column(JSONB, default=list)  # List of permission strings
-    
-    # Relationships
-    users = relationship("User", secondary="user_roles", back_populates="roles")
-
-
-class UserRole(Base, UUIDMixin, TimestampMixin):
-    """User-Role association"""
-    __tablename__ = "user_roles"
-    
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id"), nullable=False)
-
-
-# Add relationship to User
-User.roles = relationship("Role", secondary="user_roles", back_populates="users")

@@ -59,7 +59,10 @@ class ProductMediaResponse(ProductMediaBase):
     storage_provider: Optional[str]
     hash: Optional[str]
     status: str
+    width: Optional[int] = None
+    height: Optional[int] = None
     created_at: datetime
+    updated_at: datetime
 
 
 # Supplier Product
@@ -163,6 +166,8 @@ class SellerListingResponse(SellerListingBase):
     shop_id: UUID
     supplier_product_id: UUID
     custom_title: Optional[str]
+    custom_description: Optional[str] = None
+    custom_images: Optional[List[str]] = None
     status: str
     view_count: int
     order_count: int

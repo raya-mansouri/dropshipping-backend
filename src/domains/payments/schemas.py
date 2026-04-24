@@ -7,7 +7,7 @@ Pydantic schemas for payments API
 from pydantic import BaseModel, Field, ConfigDict
 from uuid import UUID
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Literal
 from decimal import Decimal
 from enum import Enum
 
@@ -58,6 +58,7 @@ class PaymentResponse(BaseModel):
     refunded_at: Optional[datetime]
     failure_reason: Optional[str]
     created_at: datetime
+    updated_at: datetime
 
 
 # Refund
@@ -81,12 +82,13 @@ class RefundResponse(BaseModel):
     reason: str
     status: RefundStatus
     requested_by: str
-    approved_by: Optional[UUID]
-    rejected_by: Optional[UUID]
-    approved_at: Optional[datetime]
-    rejected_at: Optional[datetime]
-    completed_at: Optional[datetime]
+    approved_by: Optional[UUID] = None
+    rejected_by: Optional[UUID] = None
+    approved_at: Optional[datetime] = None
+    rejected_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
     created_at: datetime
+    updated_at: datetime
 
 
 class RefundApproveRequest(BaseModel):
@@ -117,6 +119,7 @@ class DisputeResponse(BaseModel):
     id: UUID
     order_item_id: UUID
     opened_by: str
+    opened_by_id: Optional[UUID] = None
     reason: str
     evidence: List[dict]
     status: DisputeStatus
@@ -126,6 +129,7 @@ class DisputeResponse(BaseModel):
     outcome: Optional[str]
     outcome_amount: Optional[Decimal]
     created_at: datetime
+    updated_at: datetime
 
 
 # Supplier Payout
@@ -138,11 +142,14 @@ class SupplierPayoutResponse(BaseModel):
     payment_id: Optional[UUID]
     amount: Decimal = Field(description="Payout amount in Toman")
     status: str
+    payout_method: Optional[str] = None
+    payout_reference: Optional[str] = None
     delivery_confirmed_at: Optional[datetime]
     dispute_window_ends_at: Optional[datetime]
     released_at: Optional[datetime]
     failure_reason: Optional[str]
     created_at: datetime
+    updated_at: datetime
 
 
 # Payment Initialize

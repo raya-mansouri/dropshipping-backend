@@ -289,9 +289,79 @@ class BasalamConnector(BaseShopConnector):
         # Not supported by the legacy BasalamClient; return empty.
         return []
 
-    async def create_shipment(self, order_id: str, shipping_method: str) -> Dict[str, Any]:
-        # Not supported by the legacy BasalamClient.
-        raise NotImplementedError("Shipment creation not available via legacy connector")
+    async def create_shipment(
+        self,
+        order_id: str,
+        shipping_method: str,
+        tracking_code: Optional[str] = None,
+        carrier: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a shipment for a Basalam order via the parcel API.
+
+        Flow:
+          1. Look up vendor parcels for the given order_id.
+          2. Pick the first pending parcel.
+          3. Transition it to "preparation" then "posted" with tracking info.
+
+        Args:
+            order_id: The Basalam order identifier.
+            shipping_method: Shipping method code (e.g. "EXPRESS", "TIPAX").
+                Passed through to the Basalam API as-is.
+            tracking_code: Carrier tracking code.  If not supplied the
+                shipment is only marked as "in preparation" and the caller
+                must update tracking later.
+            carrier: Carrier name (informational — not sent to Basalam API,
+                but returned in the result dict for local bookkeeping).
+
+        Returns:
+            Dict with tracking_code, carrier, status, and parcel_id.
+        """
+        await self._ensure_connected()
+        client = self._get_client()
+
+        # 1. Find parcels for this order
+        result = await client.list_vendor_parcels(
+            vendor_id=self.vendor_id,
+            order_id=order_id,
+        )
+        parcels = result.get("parcels", [])
+
+        if not parcels:
+            raise BasalamAPIError(
+                f"No parcels found for order {order_id}",
+                response_data={"order_id": order_id},
+            )
+
+        parcel = parcels[0]
+        parcel_id = str(parcel.get("id") or parcel.get("parcel_id", ""))
+        if not parcel_id:
+            raise BasalamAPIError(
+                f"Parcel for order {order_id} has no id",
+                response_data=parcel,
+            )
+
+        # 2. Mark parcel as in preparation (idempotent — skip if already preparing)
+        parcel_status = parcel.get("status", "")
+        if parcel_status not in ("preparation", "posted", "delivered"):
+            await client.set_parcel_preparation(parcel_id)
+
+        # 3. If tracking_code is provided, mark as posted
+        if tracking_code:
+            await client.set_parcel_posted(
+                parcel_id=parcel_id,
+                tracking_code=tracking_code,
+                shipping_method=shipping_method,
+            )
+            status = "label_created"
+        else:
+            status = "preparing"
+
+        return {
+            "tracking_code": tracking_code,
+            "carrier": carrier or shipping_method,
+            "status": status,
+            "parcel_id": parcel_id,
+        }
 
     # ------------------------------------------------------------------
     # ShopConnectorPort — category operations

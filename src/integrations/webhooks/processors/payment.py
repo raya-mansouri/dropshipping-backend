@@ -5,6 +5,7 @@ Handles payment.completed and payment.failed events.
 """
 
 from typing import Dict, Any
+from datetime import datetime, timezone
 import structlog
 
 from sqlalchemy import select
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .base import WebhookProcessor
 from src.core.repository.unit_of_work import UnitOfWork
+from src.domains.orders.models import Order, OrderStatus
 
 
 logger = structlog.get_logger(__name__)
@@ -62,25 +64,23 @@ class PaymentWebhookProcessor(WebhookProcessor):
             logger.error("Missing required fields: payment_id or order_id")
             return False
 
-        try:
-            if event_type == "payment.completed":
-                await self._handle_payment_completed(event_data)
-            else:
-                await self._handle_payment_failed(event_data)
+        if event_type == "payment.completed":
+            result = await self._handle_payment_completed(event_data)
+        else:
+            result = await self._handle_payment_failed(event_data)
 
-            logger.info("processed_payment_event", event_type=event_type)
-            return True
-        except Exception as e:
-            logger.error("failed_to_process_payment", error=str(e))
+        if not result:
             return False
 
-    async def _handle_payment_completed(self, data: Dict[str, Any]) -> None:
+        logger.info("processed_payment_event", event_type=event_type)
+        return True
+
+    async def _handle_payment_completed(self, data: Dict[str, Any]) -> bool:
         """Handle successful payment"""
-        from src.domains.orders.models import Order
-
         order_id = data.get("order_id")
         if not order_id:
-            return
+            logger.error("payment_event_missing_order_id", payload=data)
+            return False
 
         async with UnitOfWork(self.db_session):
             stmt = select(Order).where(Order.external_order_id == order_id)
@@ -88,16 +88,20 @@ class PaymentWebhookProcessor(WebhookProcessor):
             order = result.scalar_one_or_none()
 
             if order:
-                order.payment_status = "paid"
+                order.status = OrderStatus.PAID.value
+                order.paid_at = datetime.now(timezone.utc)
                 logger.info("marked_order_paid", order_id=str(order_id))
+                return True
+            else:
+                logger.error("order_not_found_for_payment", order_id=str(order_id))
+                return False
 
-    async def _handle_payment_failed(self, data: Dict[str, Any]) -> None:
+    async def _handle_payment_failed(self, data: Dict[str, Any]) -> bool:
         """Handle failed payment"""
-        from src.domains.orders.models import Order
-
         order_id = data.get("order_id")
         if not order_id:
-            return
+            logger.error("payment_event_missing_order_id", payload=data)
+            return False
 
         async with UnitOfWork(self.db_session):
             stmt = select(Order).where(Order.external_order_id == order_id)
@@ -105,5 +109,10 @@ class PaymentWebhookProcessor(WebhookProcessor):
             order = result.scalar_one_or_none()
 
             if order:
-                order.payment_status = "failed"
+                order.status = OrderStatus.CANCELLED.value
+                order.cancelled_at = datetime.now(timezone.utc)
                 logger.info("marked_order_payment_failed", order_id=str(order_id))
+                return True
+            else:
+                logger.error("order_not_found_for_payment_failure", order_id=str(order_id))
+                return False

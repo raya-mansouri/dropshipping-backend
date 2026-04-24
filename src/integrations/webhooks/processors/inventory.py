@@ -74,17 +74,19 @@ class InventoryWebhookProcessor(WebhookProcessor):
             variant_id: The supplier variant ID
             inventory: New inventory quantity
         """
-        from src.domains.suppliers.models import SupplierVariant
+        from src.domains.products.models import SupplierVariant, ProductVariant
 
         async with UnitOfWork(self.db_session):
-            stmt = select(SupplierVariant).where(
-                SupplierVariant.external_variant_id == variant_id
+            stmt = select(SupplierVariant).join(
+                ProductVariant, SupplierVariant.variant_id == ProductVariant.id
+            ).where(
+                ProductVariant.external_variant_id == variant_id
             )
             result = await self.db_session.execute(stmt)
             variant = result.scalar_one_or_none()
 
             if variant:
-                variant.inventory_quantity = inventory
+                variant.inventory = inventory
                 logger.info("updated_inventory", variant_id=str(variant_id), inventory=inventory)
             else:
                 logger.warning("variant_not_found", variant_id=str(variant_id))

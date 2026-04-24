@@ -20,6 +20,7 @@ from sqlalchemy import (
     Numeric,
     Text,
     Index,
+    CheckConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID, JSONB

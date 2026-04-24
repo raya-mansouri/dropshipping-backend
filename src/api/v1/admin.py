@@ -11,16 +11,18 @@ import asyncio
 
 import structlog
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Literal, Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from typing import List as TypingList
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.api.deps import get_db, require_admin, get_audit_service
+from src.core.repository.unit_of_work import UnitOfWork
 from src.domains.orders.models import Order, OrderStatus, OrderItem
 from src.domains.products.models import SupplierVariant
 from src.domains.inventory.models import InventoryReservation
@@ -67,12 +69,61 @@ class WebhookRetryRequest(BaseModel):
 
 class ShopUpdateRequest(BaseModel):
     name: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[str] = Field(None, pattern=r"^(active|disabled)$")
 
 
 class UserUpdateRequest(BaseModel):
     is_active: Optional[bool] = None
-    role: Optional[str] = None
+    role: Optional[str] = Field(None, pattern=r"^(admin|user|seller|supplier)$")
+
+
+# --- Response schemas ---
+
+
+class AdminOrderItem(BaseModel):
+    id: str
+    shop_id: str
+    status: str
+    total_price: float
+    shipping_price: float
+    discount: float
+    created_at: Optional[str] = None
+
+
+class AdminOrderListResponse(BaseModel):
+    orders: TypingList[AdminOrderItem]
+    total: int
+
+
+class AdminPaymentItem(BaseModel):
+    id: str
+    order_id: str
+    status: str
+    seller_paid_amount: float
+    supplier_payable_amount: float
+    platform_fee: float
+    gateway: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class AdminPaymentListResponse(BaseModel):
+    payments: TypingList[AdminPaymentItem]
+    total: int
+
+
+class AdminDisputeItem(BaseModel):
+    id: str
+    order_item_id: str
+    opened_by: Optional[str] = None
+    status: str
+    reason: Optional[str] = None
+    outcome: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class AdminDisputeListResponse(BaseModel):
+    disputes: TypingList[AdminDisputeItem]
+    total: int
 
 @router.patch("/inventory/force")
 async def force_inventory_update(
@@ -90,18 +141,18 @@ async def force_inventory_update(
 
     old_inventory = variant.inventory
     variant.inventory = body.new_inventory
-    await session.flush()
 
-    await audit_service.log_action(
-        entity_type="supplier_variant",
-        entity_id=body.variant_id,
-        action="force_inventory_update",
-        actor_type="admin",
-        actor_id=current_user.id,
-        old_value={"inventory": old_inventory},
-        new_value={"inventory": body.new_inventory},
-        reason=body.reason,
-    )
+    async with UnitOfWork(session):
+        await audit_service.log_action(
+            entity_type="supplier_variant",
+            entity_id=body.variant_id,
+            action="force_inventory_update",
+            actor_type="admin",
+            actor_id=current_user.id,
+            old_value={"inventory": old_inventory},
+            new_value={"inventory": body.new_inventory},
+            reason=body.reason,
+        )
 
     logger.warning(
         "admin_force_inventory_update",
@@ -159,22 +210,22 @@ async def force_cancel_order(
         )
     )
     await session.execute(reservation_stmt)
-    await session.flush()
 
-    await audit_service.log_action(
-        entity_type="order",
-        entity_id=body.order_id,
-        action="force_cancel",
-        actor_type="admin",
-        actor_id=current_user.id,
-        old_value={"status": old_status},
-        new_value={
-            "status": OrderStatus.CANCELLED.value,
-            "reason": body.reason,
-            "refund": body.refund,
-        },
-        reason=body.reason,
-    )
+    async with UnitOfWork(session):
+        await audit_service.log_action(
+            entity_type="order",
+            entity_id=body.order_id,
+            action="force_cancel",
+            actor_type="admin",
+            actor_id=current_user.id,
+            old_value={"status": old_status},
+            new_value={
+                "status": OrderStatus.CANCELLED.value,
+                "reason": body.reason,
+                "refund": body.refund,
+            },
+            reason=body.reason,
+        )
 
     logger.warning(
         "admin_force_cancel_order",
@@ -208,22 +259,21 @@ async def resolve_dispute(
     if body.outcome == "partial" and body.outcome_amount:
         dispute.outcome_amount = body.outcome_amount
 
-    await session.flush()
-
-    await audit_service.log_action(
-        entity_type="dispute",
-        entity_id=body.dispute_id,
-        action="resolve",
-        actor_type="admin",
-        actor_id=current_user.id,
-        old_value={"status": old_status},
-        new_value={
-            "status": "resolved",
-            "outcome": body.outcome,
-            "outcome_amount": body.outcome_amount,
-        },
-        reason=body.resolution_notes,
-    )
+    async with UnitOfWork(session):
+        await audit_service.log_action(
+            entity_type="dispute",
+            entity_id=body.dispute_id,
+            action="resolve",
+            actor_type="admin",
+            actor_id=current_user.id,
+            old_value={"status": old_status},
+            new_value={
+                "status": "resolved",
+                "outcome": body.outcome,
+                "outcome_amount": body.outcome_amount,
+            },
+            reason=body.resolution_notes,
+        )
 
     logger.info(
         "admin_resolved_dispute",
@@ -257,18 +307,17 @@ async def review_fraud_signal(
     if body.action in ("confirm_fraud", "dismiss", "escalate"):
         signal.resolved_at = datetime.now(timezone.utc)
 
-    await session.flush()
-
-    await audit_service.log_action(
-        entity_type="fraud_signal",
-        entity_id=body.signal_id,
-        action="review",
-        actor_type="admin",
-        actor_id=current_user.id,
-        old_value={"status": old_status},
-        new_value={"status": body.action, "notes": body.notes},
-        reason=body.notes,
-    )
+    async with UnitOfWork(session):
+        await audit_service.log_action(
+            entity_type="fraud_signal",
+            entity_id=body.signal_id,
+            action="review",
+            actor_type="admin",
+            actor_id=current_user.id,
+            old_value={"status": old_status},
+            new_value={"status": body.action, "notes": body.notes},
+            reason=body.notes,
+        )
 
     logger.info(
         "admin_reviewed_fraud_signal",
@@ -403,17 +452,17 @@ async def retry_webhook(
         log_entry.processed_at = None
         log_entry.error_message = None
         log_entry.error_trace = None
-        await session.flush()
 
-        await audit_service.log_action(
-            entity_type="webhook_event",
-            entity_id=body.webhook_log_id,
-            action="retry_requested",
-            actor_type="admin",
-            actor_id=current_user.id,
-            old_value={"status": old_status, "retry_count": log_entry.retry_count},
-            new_value={"status": "received", "retry_count": 0},
-        )
+        async with UnitOfWork(session):
+            await audit_service.log_action(
+                entity_type="webhook_event",
+                entity_id=body.webhook_log_id,
+                action="retry_requested",
+                actor_type="admin",
+                actor_id=current_user.id,
+                old_value={"status": old_status, "retry_count": log_entry.retry_count},
+                new_value={"status": "received", "retry_count": 0},
+            )
 
         return {
             "status": "retry_scheduled",
@@ -439,17 +488,17 @@ async def retry_webhook(
         out_entry.retry_count = 0
         out_entry.last_error = None
         out_entry.next_retry_at = None
-        await session.flush()
 
-        await audit_service.log_action(
-            entity_type="outgoing_webhook_log",
-            entity_id=body.webhook_log_id,
-            action="retry_requested",
-            actor_type="admin",
-            actor_id=current_user.id,
-            old_value={"status": old_status},
-            new_value={"status": "pending", "retry_count": 0},
-        )
+        async with UnitOfWork(session):
+            await audit_service.log_action(
+                entity_type="outgoing_webhook_log",
+                entity_id=body.webhook_log_id,
+                action="retry_requested",
+                actor_type="admin",
+                actor_id=current_user.id,
+                old_value={"status": old_status},
+                new_value={"status": "pending", "retry_count": 0},
+            )
 
         return {
             "status": "retry_scheduled",
@@ -530,17 +579,17 @@ async def update_shop(
         shop.status = body.status
 
     shop.updated_at = datetime.now(timezone.utc)
-    await session.flush()
 
-    await audit_service.log_action(
-        entity_type="shop",
-        entity_id=shop_id,
-        action="updated",
-        actor_type="admin",
-        actor_id=current_user.id,
-        old_value=old_values if old_values else None,
-        new_value=body.model_dump(exclude_none=True),
-    )
+    async with UnitOfWork(session):
+        await audit_service.log_action(
+            entity_type="shop",
+            entity_id=shop_id,
+            action="updated",
+            actor_type="admin",
+            actor_id=current_user.id,
+            old_value=old_values if old_values else None,
+            new_value=body.model_dump(exclude_none=True),
+        )
 
     return {
         "id": str(shop.id),
@@ -621,17 +670,17 @@ async def update_user(
         user.role = body.role
 
     user.updated_at = datetime.now(timezone.utc)
-    await session.flush()
 
-    await audit_service.log_action(
-        entity_type="user",
-        entity_id=user_id,
-        action="updated",
-        actor_type="admin",
-        actor_id=current_user.id,
-        old_value=old_values if old_values else None,
-        new_value={"is_active": user.is_active, "role": user.role},
-    )
+    async with UnitOfWork(session):
+        await audit_service.log_action(
+            entity_type="user",
+            entity_id=user_id,
+            action="updated",
+            actor_type="admin",
+            actor_id=current_user.id,
+            old_value=old_values if old_values else None,
+            new_value={"is_active": user.is_active, "role": user.role},
+        )
 
     return {
         "id": str(user.id),
@@ -642,11 +691,9 @@ async def update_user(
 
 
 # --- System-wide read endpoints ---
-# TODO: Replace Dict[str, Any] response_model with proper Pydantic schemas
-# for list_all_orders, list_all_payments, and list_all_disputes.
 
 
-@router.get("/orders", response_model=Dict[str, Any])
+@router.get("/orders", response_model=AdminOrderListResponse)
 async def list_all_orders(
     status: Optional[str] = None,
     shop_id: Optional[UUID] = None,
@@ -722,7 +769,7 @@ async def admin_dashboard(
     }
 
 
-@router.get("/payments", response_model=Dict[str, Any])
+@router.get("/payments", response_model=AdminPaymentListResponse)
 async def list_all_payments(
     status: Optional[str] = None,
     limit: int = 50,
@@ -762,7 +809,7 @@ async def list_all_payments(
     }
 
 
-@router.get("/disputes", response_model=Dict[str, Any])
+@router.get("/disputes", response_model=AdminDisputeListResponse)
 async def list_all_disputes(
     status: Optional[str] = None,
     limit: int = 50,

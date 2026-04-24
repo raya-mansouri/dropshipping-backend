@@ -32,18 +32,22 @@ class OrderItemCreate(BaseModel):
 
 class OrderItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID
     order_id: UUID
     supplier_shop_id: UUID
     variant_id: UUID
+    seller_listing_id: Optional[UUID] = None
     quantity: int
     supplier_price: Decimal = Field(description="Supplier cost at order time in Toman")
     seller_price: Decimal = Field(description="Seller price at order time in Toman")
     shipping_price: Decimal = Field(description="Shipping cost in Toman")
     profit: Optional[Decimal] = Field(None, description="Profit in Toman")
     status: OrderStatus
+    reject_reason: Optional[str] = None
+    rejected_at: Optional[datetime] = None
     created_at: datetime
+    updated_at: datetime
 
 
 # Order
@@ -60,8 +64,9 @@ class OrderUpdate(BaseModel):
 
 class OrderResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID
+    platform_id: Optional[UUID] = None
     shop_id: UUID
     external_order_id: Optional[str]
     customer_data: dict
@@ -70,6 +75,7 @@ class OrderResponse(BaseModel):
     discount: Decimal = Field(description="Discount amount in Toman")
     status: OrderStatus
     notes: Optional[str]
+    metadata: Optional[dict] = None
     confirmed_at: Optional[datetime]
     paid_at: Optional[datetime]
     shipped_at: Optional[datetime]
@@ -84,10 +90,11 @@ class OrderResponse(BaseModel):
 # Shipment
 class ShipmentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID
     order_id: UUID
     order_item_id: UUID
+    shipping_method_id: Optional[UUID] = None
     tracking_code: Optional[str]
     carrier: Optional[str]
     status: ShipmentStatus
@@ -95,7 +102,10 @@ class ShipmentResponse(BaseModel):
     delivered_at: Optional[datetime]
     delivery_confirmed_at: Optional[datetime]
     delivery_confirmed_by: Optional[str]
+    estimated_delivery: Optional[datetime] = None
+    actual_delivery: Optional[datetime] = None
     created_at: datetime
+    updated_at: datetime
 
 
 class DeliveryConfirmRequest(BaseModel):
@@ -105,12 +115,14 @@ class DeliveryConfirmRequest(BaseModel):
 # Order History
 class OrderHistoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: UUID
     order_id: UUID
     order_item_id: Optional[UUID]
     from_status: Optional[str]
     to_status: str
     actor_type: Optional[str]
+    actor_id: Optional[UUID] = None
     reason: Optional[str]
+    metadata: Optional[dict] = None
     created_at: datetime
