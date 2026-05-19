@@ -286,3 +286,16 @@ async def get_payment_service(
     from src.domains.payments.service import PaymentService
 
     return PaymentService(session=db, event_publisher=event_publisher)
+
+
+# ---- Pricing Service Dependency ----
+
+
+async def get_pricing_service(
+    db: AsyncSession = Depends(get_db),
+    event_publisher: EventPublisher | None = Depends(get_optional_event_publisher),
+):
+    """Dependency to get a PricingService instance."""
+    from src.domains.pricing.service import PricingService
+
+    return PricingService(session=db, event_publisher=event_publisher)

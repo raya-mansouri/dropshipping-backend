@@ -22,7 +22,8 @@ from prometheus_client import generate_latest
 from src.api.deps import require_admin
 from src.api.v1 import auth, orders, products, shops, health, notifications
 from src.api.v1 import webhooks, webhook_health, admin, payment
-from src.api.v1 import inventory, payments, shipping
+from src.api.v1 import inventory, payments, shipping, pricing
+from src.api.v1 import product_validation
 from src.core.config import get_settings
 from src.core.events.publisher import EventPublisher
 from src.core.logging import configure_logging
@@ -146,6 +147,8 @@ app.include_router(admin.router, prefix="/api/v1")
 app.include_router(payment.router, prefix="/api/v1")
 app.include_router(payments.router, prefix="/api/v1")
 app.include_router(shipping.router, prefix="/api/v1")
+app.include_router(pricing.router, prefix="/api/v1")
+app.include_router(product_validation.router, prefix="/api/v1")
 
 
 # ============================================

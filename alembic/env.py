@@ -23,7 +23,7 @@ from src.core.database import Base
 config = context.config
 
 # Load DB URL from app settings (overrides alembic.ini)
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+config.set_main_option("sqlalchemy.url", get_settings().effective_database_url)
 
 # Interpret the config file for Python logging
 if config.config_file_name is not None:

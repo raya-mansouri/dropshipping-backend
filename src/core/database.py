@@ -24,7 +24,7 @@ NAMING_CONVENTION = {
 
 Base = declarative_base(metadata=MetaData(naming_convention=NAMING_CONVENTION))
 
-DATABASE_URL = get_settings().database_url
+DATABASE_URL = get_settings().effective_database_url
 
 engine = create_async_engine(
     DATABASE_URL,

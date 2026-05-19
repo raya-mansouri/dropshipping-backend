@@ -375,7 +375,7 @@ async def seed_seller_listings(session, seller_shop, supplier_products):
 async def seed_orders(session, seller_shop, supplier_shop, listings):
     """Create 2 orders in different states: pending and paid."""
     from src.domains.orders.models import Order, OrderItem, OrderStatus
-    from src.domains.products.models import ProductVariant, SellerListing
+    from src.domains.products.models import ProductVariant, SellerListing, SellerVariant
 
     created_any = False
 

@@ -23,6 +23,7 @@ class User(Base, UUIDMixin, TimestampMixin):
     
     # Relationships
     accounts = relationship("Account", back_populates="owner")
+    notifications = relationship("Notification", back_populates="user")
 
 
 class Account(Base, UUIDMixin, TimestampMixin):

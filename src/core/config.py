@@ -23,8 +23,9 @@ class Settings(BaseSettings):
     )
 
     # ------------------------------------------------------------------
-    # Database
+    # Database — accepts full URL or individual fields
     # ------------------------------------------------------------------
+    database_url: str = ""  # Set directly in .env, takes priority over fields below
     db_host: str = "localhost"
     db_port: int = 5432
     db_user: str = "postgres"
@@ -117,7 +118,10 @@ class Settings(BaseSettings):
     webhook_default_timestamp_tolerance: int = 300  # seconds
 
     @property
-    def database_url(self) -> str:
+    def effective_database_url(self) -> str:
+        """Return explicit DATABASE_URL if set, otherwise construct from fields."""
+        if self.database_url:
+            return self.database_url
         return (
             f"postgresql+asyncpg://{self.db_user}:{self.db_password.get_secret_value()}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
